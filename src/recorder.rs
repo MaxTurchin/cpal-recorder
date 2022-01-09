@@ -75,7 +75,7 @@ impl Recorder {
         let writer = hound::WavWriter::create(path, wav_spec).unwrap();
         let writer = Arc::new(Mutex::new(Some(writer)));
 
-        return utils::make_stream(&self.input_config, &self.input, &writer);
+        return utils::make_write_stream(&self.input_config, &self.input, &writer);
     }
 
 

@@ -50,54 +50,6 @@ pub fn show_config(config: &SupportedStreamConfig) {
 }
 
 
-pub fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
-where
-    T: cpal::Sample,
-    U: cpal::Sample + hound::Sample,
-{
-    if let Ok(mut guard) = writer.try_lock() {
-        if let Some(writer) = guard.as_mut() {
-            for &sample in input.iter() {
-                let sample: U = cpal::Sample::from(&sample);
-                writer.write_sample(sample).ok();
-            }
-        }
-    }
-}
-
-
-pub fn write_input_data_to_buf<T>(data: &[T], producer: &mut Producer<T>)
-where
-    T: cpal::Sample
-{
-    for &sample in data {
-        producer.push(sample).ok();
-    }
-}
-
-
-pub fn read_data_from_buf<T>(data: &mut [T], consumer: &mut Consumer<T>)
-where
-    T: cpal::Sample
-{
-    for sample in data {
-        *sample = match consumer.pop() {
-            Some(s) => s,
-            None => continue
-        };
-    }
-}
-
-
-pub fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
-    match format {
-        cpal::SampleFormat::U16 => hound::SampleFormat::Int,
-        cpal::SampleFormat::I16 => hound::SampleFormat::Int,
-        cpal::SampleFormat::F32 => hound::SampleFormat::Float,
-    }
-}
-
-
 pub fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavSpec {
     hound::WavSpec {
         channels: config.channels() as _,
@@ -108,12 +60,7 @@ pub fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavS
 }
 
 
-pub fn err_fn(error: cpal::StreamError) {
-    eprintln!("an error occurred on stream: {}", error);
-}
-
-
-pub fn make_stream(input_config: &SupportedStreamConfig,
+pub fn make_write_stream(input_config: &SupportedStreamConfig,
                input_device: &Device,
                writer:   &WavWriterHandle) -> Stream {
 
@@ -221,4 +168,56 @@ pub fn make_monitor_streams(input_config:  &SupportedStreamConfig,
         }
     };
     return (monitor_input, monitor_output);
+}
+
+
+fn err_fn(error: cpal::StreamError) {
+    eprintln!("an error occurred on stream: {}", error);
+}
+
+
+fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
+    match format {
+        cpal::SampleFormat::U16 => hound::SampleFormat::Int,
+        cpal::SampleFormat::I16 => hound::SampleFormat::Int,
+        cpal::SampleFormat::F32 => hound::SampleFormat::Float,
+    }
+}
+
+//Used for write streams
+fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
+where
+    T: cpal::Sample,
+    U: cpal::Sample + hound::Sample,
+{
+    if let Ok(mut guard) = writer.try_lock() {
+        if let Some(writer) = guard.as_mut() {
+            for &sample in input.iter() {
+                let sample: U = cpal::Sample::from(&sample);
+                writer.write_sample(sample).ok();
+            }
+        }
+    }
+}
+
+
+//Used for monitor streams
+fn write_input_data_to_buf<T>(data: &[T], producer: &mut Producer<T>)
+where
+    T: cpal::Sample
+{
+    for &sample in data {
+        producer.push(sample).ok();
+    }
+}
+fn read_data_from_buf<T>(data: &mut [T], consumer: &mut Consumer<T>)
+where
+    T: cpal::Sample
+{
+    for sample in data {
+        *sample = match consumer.pop() {
+            Some(s) => s,
+            None => continue
+        };
+    }
 }
