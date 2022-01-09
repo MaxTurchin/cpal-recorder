@@ -7,7 +7,8 @@ edition = "2021"
 
 [dependencies]
 
-cpal = {version = "0.13.4", features = ["asio"]}
+# cpal = {version = "0.13.4", features = ["asio"]}
+cpal = "0.13.4"
 hound = "3.4.0"
 anyhow = "1.0.52"
 crossterm = "0.16.0"
