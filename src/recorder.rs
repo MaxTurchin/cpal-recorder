@@ -3,128 +3,98 @@ use std::sync::{
     Arc,
     Mutex
 };
-
-use cpal::traits::{
-    DeviceTrait,
-    HostTrait
-};
-
 use cpal::{
     StreamConfig,
     SampleFormat,
-    Host,
+    Stream,
     Device
 };
-use cpal::Stream;
-
+use cpal::traits::StreamTrait;
 use hound;
 
 use crate::utils;
 
 
-pub struct Recorder {
-    wav_path: String,
-    host:     Host,
-    input:    Device,
-    output:   Device,
-
-    input_config:  StreamConfig,
-    output_config: StreamConfig,
-    sample_format: SampleFormat
+pub struct RecorderConfig {
+    pub wav_path: String,
+    pub input:    Device,
+    pub input_config:  StreamConfig,
+    pub sample_format: SampleFormat
 }
 
 
+pub struct MonitorConfig {
+    pub input:  Device,
+    pub output: Device,
+    pub input_config:  cpal::StreamConfig,
+    pub output_config: cpal::StreamConfig,
+    pub sample_format: cpal::SampleFormat
+}
+
+
+pub struct Recorder {
+    input_stream: Stream
+}
+
 impl Recorder {
-    pub fn new_default() -> Recorder {
-        let wav_path = "./wav.wav".to_string();
-
-        let host = cpal::default_host();
-        
-        let input = host.default_input_device().unwrap();
-        let output = host.default_output_device().unwrap();
-
-        let input_config = input.default_input_config().unwrap();
-        let output_config = output.default_output_config().unwrap();
-
-        let sample_format = input_config.sample_format();
-
-        let input_config = input_config.config();
-        let output_config = output_config.config();
-
-        // let input_config = cpal::StreamConfig {
-        //     channels: 1 as u16,
-        //     sample_rate: cpal::SampleRate(44100 as u32),
-        //     buffer_size: cpal::BufferSize::Default
-        // };
-
-        // let output_config = cpal::StreamConfig {
-        //     channels: 2 as u16,
-        //     sample_rate: cpal::SampleRate(44100 as u32),
-        //     buffer_size: cpal::BufferSize::Default
-        // };
-
-        //temporary for ASIO testing:
-        // let host = cpal::host_from_id(cpal::HostId::Asio).unwrap();
-        // let input = host.input_devices().unwrap()
-        //             .find(|x| x.name().map(|y| y == "Focusrite USB ASIO").unwrap_or(false))
-        //             .unwrap();
-        // let output = host.output_devices().unwrap()
-        //             .find(|x| x.name().map(|y| y == "Focusrite USB ASIO").unwrap_or(false))
-        //             .unwrap();
-
-        // let input_config = input.default_input_config().unwrap();
-        // let output_config = output.default_output_config().unwrap();
-       
-        return Recorder {
-            wav_path: wav_path,
-
-            host:   host,
-            input:  input,
-            output: output,
-
-            input_config:  input_config,
-            output_config: output_config,
-            sample_format: sample_format
-        }
-    }
-
-
-    pub fn record(&self) -> Stream {
-        let path = self.wav_path.clone();
-        let wav_spec = utils::wav_spec_from_config(&self.input_config,
-                                                   &self.sample_format);
+    fn _new(conf: &RecorderConfig) -> Recorder {
+        let path = conf.wav_path.clone();
+        let wav_spec = utils::wav_spec_from_config(&conf.input_config,
+                                                   &conf.sample_format);
 
         let writer = hound::WavWriter::create(path, wav_spec).unwrap();
         let writer = Arc::new(Mutex::new(Some(writer)));
 
-        return utils::make_write_stream(&self.input_config,
-                                        &self.input, 
-                                        &self.sample_format,
-                                        &writer);
+        return Recorder {
+            input_stream: utils::make_write_stream(&conf.input_config,
+                                                   &conf.input,
+                                                   &conf.sample_format,
+                                                   &writer)
+        };
     }
 
+    pub fn start_recording(conf: &RecorderConfig) -> Recorder {
+        let rec = Recorder::_new(conf);
+        rec.input_stream.play().unwrap();
 
-    pub fn monitor(&self) -> (Stream, Stream){
-        return utils:: make_monitor_streams(&self.input_config,
-                                            &self.output_config,
-                                            &self.sample_format,
-                                            &self.input,
-                                            &self.output);
+        return rec;
     }
 
+    pub fn stop_recording(self) {
+        drop(self.input_stream);
+    }
+}
 
-    pub fn show(self) {
-        println!("Recorder:");
-        let host_name = self.host.id().name();
-        let input_name = self.input.name().unwrap();
-        let output_name = self.output.name().unwrap();
 
-        println!("\thost: {}\n\tinput device: {}\n\toutput device: {}\n",
-                 host_name, input_name, output_name);
+pub struct Monitor {
+    input_stream: Stream,
+    output_stream: Stream
+}
 
-        println!("Input Config:");
-        utils::show_config(&self.input_config);
-        println!("Output Config:");
-        utils::show_config(&self.output_config);
+impl Monitor {
+    fn _new(conf: &MonitorConfig) -> Monitor {
+
+        let (input_stream, output_stream) = utils::make_monitor_streams(&conf.input_config,
+                                                                        &conf.output_config,
+                                                                        &conf.sample_format,
+                                                                        &conf.input,
+                                                                        &conf.output);
+        return Monitor {
+            input_stream: input_stream,
+            output_stream: output_stream
+        };
+    }
+
+    pub fn start_monitor(conf: &MonitorConfig) -> Monitor{
+        let monitor = Monitor::_new(conf);
+        monitor.input_stream.play().unwrap();
+        monitor.output_stream.play().unwrap();
+
+        return monitor;
+    }
+
+    pub fn stop_monitor(self) {
+        drop(self.input_stream);
+        drop(self.output_stream);
     }
 }

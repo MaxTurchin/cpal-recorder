@@ -1,13 +1,27 @@
-use std::sync::{Arc, Mutex};
 use std::fs::File;
 use std::io::BufWriter;
+use std::sync::{
+    Arc,
+    Mutex
+};
+use cpal::{
+    Stream,
+    Device,
+    StreamConfig,
+    SampleFormat
+};
+use cpal::traits::{
+    DeviceTrait,
+    HostTrait
+};
+use ringbuf::{
+    RingBuffer,
+    Consumer,
+    Producer
+};
 
-use cpal::{Stream, Device, StreamConfig, SampleFormat};
-use cpal::traits::{DeviceTrait, HostTrait};
 
-use ringbuf::RingBuffer;
-use ringbuf::{Consumer, Producer};
-
+pub type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 
 pub fn show_hosts() {
     let host_ids = cpal::available_hosts();
@@ -18,8 +32,6 @@ pub fn show_hosts() {
     }
     println!();
 }
-
-pub type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 
 
 pub fn show_devices() {
@@ -61,10 +73,10 @@ pub fn wav_spec_from_config(config:   &StreamConfig,
 }
 
 
-pub fn make_write_stream(input_config: &StreamConfig,
-                         input_device: &Device,
+pub fn make_write_stream(input_config:  &StreamConfig,
+                         input_device:  &Device,
                          sample_format: &SampleFormat,
-                         writer:   &WavWriterHandle) -> Stream {
+                         writer:        &WavWriterHandle) -> Stream {
 
     let wav_writer = writer.clone();
 
@@ -96,7 +108,7 @@ pub fn make_monitor_streams(input_config:  &StreamConfig,
                             sample_format: &SampleFormat,
                             input_device:  &Device,
                             output_device: &Device) -> (Stream, Stream) {
-    let latency = 150.0;
+    let latency = 300.0;
     let frames = (latency / 1_000.0) * (input_config.sample_rate.0 as f32);
     let mono_stereo = MonoStereo::channels_to_enum(input_config.channels);
 
@@ -220,6 +232,7 @@ impl MonoStereo {
         }
     }
 }
+
 
 //Used for monitor streams
 fn write_input_data_to_buf<T>(data:     &[T],
