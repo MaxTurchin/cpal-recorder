@@ -18,17 +18,21 @@ use crate::utils;
 pub struct RecorderConfig {
     pub wav_path: String,
     pub input:    Device,
-    pub input_config:  StreamConfig,
-    pub sample_format: SampleFormat
+    pub input_config:   StreamConfig,
+    pub sample_format:  SampleFormat,
+    pub mono_stereo:    utils::MonoStereo,
+    pub input_channels: Vec<i8>,
 }
 
 
 pub struct MonitorConfig {
     pub input:  Device,
     pub output: Device,
-    pub input_config:  cpal::StreamConfig,
-    pub output_config: cpal::StreamConfig,
-    pub sample_format: cpal::SampleFormat
+    pub input_config:   cpal::StreamConfig,
+    pub output_config:  cpal::StreamConfig,
+    pub sample_format:  cpal::SampleFormat,
+    pub mono_stereo:    utils::MonoStereo,
+    pub input_channels: Vec<i8>,
 }
 
 
@@ -48,6 +52,8 @@ impl Recorder {
         return Recorder {
             input_stream: utils::make_write_stream(&conf.input_config,
                                                    &conf.input,
+                                                   &conf.mono_stereo,
+                                                   &conf.input_channels,
                                                    &conf.sample_format,
                                                    &writer)
         };
@@ -78,7 +84,9 @@ impl Monitor {
                                                                         &conf.output_config,
                                                                         &conf.sample_format,
                                                                         &conf.input,
-                                                                        &conf.output);
+                                                                        &conf.output,
+                                                                        &conf.mono_stereo,
+                                                                        &conf.input_channels);
         return Monitor {
             input_stream: input_stream,
             output_stream: output_stream
