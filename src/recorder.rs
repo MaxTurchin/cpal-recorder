@@ -49,7 +49,7 @@ impl Recorder {
         let sample_format = input_config.sample_format();
 
         let input_config = input_config.config();
-        // let output_config = output_config.config();
+        let output_config = output_config.config();
 
         // let input_config = cpal::StreamConfig {
         //     channels: 1 as u16,
@@ -57,11 +57,11 @@ impl Recorder {
         //     buffer_size: cpal::BufferSize::Default
         // };
 
-        let output_config = cpal::StreamConfig {
-            channels: 2 as u16,
-            sample_rate: cpal::SampleRate(44100 as u32),
-            buffer_size: cpal::BufferSize::Default
-        };
+        // let output_config = cpal::StreamConfig {
+        //     channels: 2 as u16,
+        //     sample_rate: cpal::SampleRate(44100 as u32),
+        //     buffer_size: cpal::BufferSize::Default
+        // };
 
         //temporary for ASIO testing:
         // let host = cpal::host_from_id(cpal::HostId::Asio).unwrap();
@@ -87,16 +87,6 @@ impl Recorder {
             sample_format: sample_format
         }
     }
-
-    // pub fn new(host_id: HostId, output_id: u8, input_id: u8) -> Recorder {
-    //     let host = cpal::host_from_id(host_id).unwrap();
-    //     let input = host.input_devices().unwrap()
-    //                 .find();
-    //     let output = host.default_output_device().unwrap();
-
-    //     let input_config = input.default_input_config().unwrap();
-    //     let output_config = output.default_output_config().unwrap();
-    // }
 
 
     pub fn record(&self) -> Stream {
