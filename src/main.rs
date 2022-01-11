@@ -1,4 +1,5 @@
 mod recorder;
+mod track;
 mod utils;
 
 use cpal::traits::{DeviceTrait, HostTrait};
@@ -44,6 +45,15 @@ fn main() {
         input_channels.clone(),
     );
 
+    let mut track = track::Track::new(
+        "track".to_string(),
+        &host,
+        "Analogue 1 + 2 (Focusrite Usb Audio)".to_string(),
+        "Speakers (Focusrite Usb Audio)".to_string(),
+        vec![1],
+        mono_stereo.clone(),
+    );
+
     println!("...");
     println!("...");
     println!("...");
@@ -57,10 +67,10 @@ fn main() {
                 println!("Rec...");
                 // rec.start_recording();
                 // monitor.start_monitor();
-                let mon = recorder::Monitor::new(&monitor_conf);
-                let rec = recorder::Recorder::new(&recorder_conf);
-                mon.start_monitor();
-                rec.start_recording();
+                // let mon = recorder::Monitor::new(&monitor_conf);
+                // let rec = recorder::Recorder::new(&recorder_conf);
+                track.start_monitor();
+                track.start_recording();
 
                 loop {
                     thread::sleep(time::Duration::from_millis(10));
@@ -69,8 +79,8 @@ fn main() {
                             code: KeyCode::Enter,
                             modifiers: _no_modifiers,
                         }) => {
-                            rec.stop_recording();
-                            mon.stop_monitor();
+                            track.stop_recording();
+                            track.stop_monitor();
                             break;
                         }
                         _ => (),

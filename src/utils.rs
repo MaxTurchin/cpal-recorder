@@ -263,7 +263,7 @@ pub fn make_monitor_streams(
     mono_stereo: &MonoStereo,
     channels: &Vec<i8>,
 ) -> (Stream, Stream) {
-    let latency = 300.0;
+    let latency = 30.0;
     let frames = (latency / 1_000.0) * (input_config.sample_rate.0 as f32);
 
     let mut conf = WriteConfig {

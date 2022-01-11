@@ -86,7 +86,7 @@ impl MonitorConfig {
 }
 
 pub struct Recorder {
-    input_stream: Stream,
+    pub input_stream: Box<Stream>,
 }
 
 impl Recorder {
@@ -98,14 +98,14 @@ impl Recorder {
         let writer = Arc::new(Mutex::new(Some(writer)));
 
         return Recorder {
-            input_stream: utils::make_write_stream::<f32, f32>(
+            input_stream: Box::new(utils::make_write_stream::<f32, f32>(
                 &conf.input_config,
                 &conf.input,
                 &conf.mono_stereo,
                 &conf.input_channels,
                 &conf.sample_format,
                 &writer,
-            ),
+            )),
         };
     }
 
@@ -113,14 +113,14 @@ impl Recorder {
         self.input_stream.play().unwrap();
     }
 
-    pub fn stop_recording(self) {
-        drop(self.input_stream);
+    pub fn stop_recording(&mut self) {
+        drop(&*self.input_stream);
     }
 }
 
 pub struct Monitor {
-    input_stream: Stream,
-    output_stream: Stream,
+    input_stream: Box<Stream>,
+    output_stream: Box<Stream>,
 }
 
 impl Monitor {
@@ -135,8 +135,8 @@ impl Monitor {
             &conf.input_channels,
         );
         return Monitor {
-            input_stream: input_stream,
-            output_stream: output_stream,
+            input_stream: Box::new(input_stream),
+            output_stream: Box::new(output_stream),
         };
     }
 
@@ -145,8 +145,8 @@ impl Monitor {
         self.output_stream.play().unwrap();
     }
 
-    pub fn stop_monitor(self) {
-        drop(self.input_stream);
-        drop(self.output_stream);
+    pub fn stop_monitor(&mut self) {
+        drop(&*self.input_stream);
+        drop(&*self.output_stream);
     }
 }
