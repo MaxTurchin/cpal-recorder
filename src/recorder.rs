@@ -1,69 +1,116 @@
-
-use std::sync::{
-    Arc,
-    Mutex
-};
-use cpal::{
-    StreamConfig,
-    SampleFormat,
-    Stream,
-    Device
-};
-use cpal::traits::StreamTrait;
+use cpal::traits::{DeviceTrait, StreamTrait};
+use cpal::{BufferSize, Device, SampleFormat, Stream, StreamConfig};
 use hound;
+use std::sync::{Arc, Mutex};
 
 use crate::utils;
 
-
 pub struct RecorderConfig {
     pub wav_path: String,
-    pub input:    Device,
-    pub input_config:   StreamConfig,
-    pub sample_format:  SampleFormat,
-    pub mono_stereo:    utils::MonoStereo,
-    pub input_channels: Vec<i8>,
+    input: Device,
+    input_config: StreamConfig,
+    sample_format: SampleFormat,
+    mono_stereo: utils::MonoStereo,
+    input_channels: Vec<i8>,
 }
 
+//TODO: validation of buffer_size
+impl RecorderConfig {
+    pub fn new(
+        fpath: String,
+        input_device: Device,
+        mono_stereo: utils::MonoStereo,
+        input_channels: Vec<i8>,
+    ) -> RecorderConfig {
+        let default_input_conf = input_device.default_input_config().unwrap();
+        let sample_f = default_input_conf.sample_format();
 
+        let input_conf = default_input_conf.config();
+
+        return RecorderConfig {
+            wav_path: fpath,
+            input: input_device,
+            input_config: input_conf,
+            sample_format: sample_f,
+            mono_stereo: mono_stereo,
+            input_channels: input_channels,
+        };
+    }
+
+    pub fn set_buffer_size(&mut self, buffer_s: &BufferSize) {
+        self.input_config.buffer_size = buffer_s.clone();
+    }
+}
+
+//TODO: validation of buffer_size
 pub struct MonitorConfig {
-    pub input:  Device,
-    pub output: Device,
-    pub input_config:   cpal::StreamConfig,
-    pub output_config:  cpal::StreamConfig,
-    pub sample_format:  cpal::SampleFormat,
-    pub mono_stereo:    utils::MonoStereo,
-    pub input_channels: Vec<i8>,
+    input: Device,
+    output: Device,
+    input_config: cpal::StreamConfig,
+    output_config: cpal::StreamConfig,
+    sample_format: cpal::SampleFormat,
+    mono_stereo: utils::MonoStereo,
+    input_channels: Vec<i8>,
 }
 
+impl MonitorConfig {
+    pub fn new(
+        input_device: Device,
+        output_device: Device,
+        mono_stereo: utils::MonoStereo,
+        input_channels: Vec<i8>,
+    ) -> MonitorConfig {
+        let default_input_conf = input_device.default_input_config().unwrap();
+        let default_output_conf = output_device.default_output_config().unwrap();
+
+        let sample_f = default_input_conf.sample_format();
+
+        let input_conf = default_input_conf.config();
+        let output_conf = default_output_conf.config();
+
+        return MonitorConfig {
+            input: input_device,
+            output: output_device,
+            input_config: input_conf,
+            output_config: output_conf,
+            sample_format: sample_f,
+            mono_stereo: mono_stereo,
+            input_channels: input_channels,
+        };
+    }
+
+    pub fn set_buffer_size(&mut self, buffer_s: &BufferSize) {
+        self.input_config.buffer_size = buffer_s.clone();
+        self.output_config.buffer_size = buffer_s.clone();
+    }
+}
 
 pub struct Recorder {
-    input_stream: Stream
+    input_stream: Stream,
 }
 
 impl Recorder {
-    fn _new(conf: &RecorderConfig) -> Recorder {
+    pub fn new(conf: &RecorderConfig) -> Recorder {
         let path = conf.wav_path.clone();
-        let wav_spec = utils::wav_spec_from_config(&conf.input_config,
-                                                   &conf.sample_format);
+        let wav_spec = utils::wav_spec_from_config(&conf.input_config, &conf.sample_format);
 
         let writer = hound::WavWriter::create(path, wav_spec).unwrap();
         let writer = Arc::new(Mutex::new(Some(writer)));
 
         return Recorder {
-            input_stream: utils::make_write_stream(&conf.input_config,
-                                                   &conf.input,
-                                                   &conf.mono_stereo,
-                                                   &conf.input_channels,
-                                                   &conf.sample_format,
-                                                   &writer)
+            input_stream: utils::make_write_stream::<f32, f32>(
+                &conf.input_config,
+                &conf.input,
+                &conf.mono_stereo,
+                &conf.input_channels,
+                &conf.sample_format,
+                &writer,
+            ),
         };
     }
 
-    pub fn start_recording(conf: &RecorderConfig) -> Recorder {
-        let rec = Recorder::_new(conf);
-        rec.input_stream.play().unwrap();
-
-        return rec;
+    pub fn start_recording(&self) {
+        self.input_stream.play().unwrap();
     }
 
     pub fn stop_recording(self) {
@@ -71,34 +118,31 @@ impl Recorder {
     }
 }
 
-
 pub struct Monitor {
     input_stream: Stream,
-    output_stream: Stream
+    output_stream: Stream,
 }
 
 impl Monitor {
-    fn _new(conf: &MonitorConfig) -> Monitor {
-
-        let (input_stream, output_stream) = utils::make_monitor_streams(&conf.input_config,
-                                                                        &conf.output_config,
-                                                                        &conf.sample_format,
-                                                                        &conf.input,
-                                                                        &conf.output,
-                                                                        &conf.mono_stereo,
-                                                                        &conf.input_channels);
+    pub fn new(conf: &MonitorConfig) -> Monitor {
+        let (input_stream, output_stream) = utils::make_monitor_streams(
+            &conf.input_config,
+            &conf.output_config,
+            &conf.sample_format,
+            &conf.input,
+            &conf.output,
+            &conf.mono_stereo,
+            &conf.input_channels,
+        );
         return Monitor {
             input_stream: input_stream,
-            output_stream: output_stream
+            output_stream: output_stream,
         };
     }
 
-    pub fn start_monitor(conf: &MonitorConfig) -> Monitor{
-        let monitor = Monitor::_new(conf);
-        monitor.input_stream.play().unwrap();
-        monitor.output_stream.play().unwrap();
-
-        return monitor;
+    pub fn start_monitor(&self) {
+        self.input_stream.play().unwrap();
+        self.output_stream.play().unwrap();
     }
 
     pub fn stop_monitor(self) {
