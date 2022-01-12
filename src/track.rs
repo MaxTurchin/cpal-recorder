@@ -4,11 +4,11 @@ use crate::{recorder, utils};
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::Host;
 
-
 pub struct Track {
     name: String,
     files: Vec<String>,
-    input_channels: Vec<i8>,
+    input_channels: Vec<u8>,
+    output_channels: Vec<u8>,
     mono_stereo: utils::MonoStereo,
     //TODO: output_channels: Vec<i8>,
     monitor_config: recorder::MonitorConfig,
@@ -23,7 +23,8 @@ impl Track {
         host: &Host,
         input_device_name: String,
         output_device_name: String,
-        input_channels: Vec<i8>,
+        input_channels: Vec<u8>,
+        output_channels: Vec<u8>,
         mono_stereo: utils::MonoStereo,
     ) -> Track {
         let file = format!("{}_1.wav", name);
@@ -46,6 +47,7 @@ impl Track {
             output_device,
             mono_stereo.clone(),
             input_channels.clone(),
+            output_channels.clone(),
         );
 
         let input_device = host
@@ -67,6 +69,7 @@ impl Track {
             name: name,
             files: files,
             input_channels: input_channels,
+            output_channels: output_channels,
             mono_stereo: mono_stereo,
 
             monitor_config: monitor_conf,

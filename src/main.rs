@@ -11,7 +11,7 @@ fn main() {
     utils::show_devices();
 
     let host = cpal::default_host();
-    let mono_stereo = utils::MonoStereo::STEREO;
+    let mono_stereo = utils::MonoStereo::MONO;
 
     println!(
         "{:?}",
@@ -28,12 +28,12 @@ fn main() {
             .unwrap()
     );
 
-
     let mut track = track::Track::new(
         "track".to_string(),
         &host,
         "Analogue 1 + 2 (Focusrite Usb Audio)".to_string(),
         "Speakers (Focusrite Usb Audio)".to_string(),
+        vec![1],
         vec![1, 2],
         mono_stereo.clone(),
     );

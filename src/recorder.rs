@@ -11,7 +11,7 @@ pub struct RecorderConfig {
     input_config: StreamConfig,
     sample_format: SampleFormat,
     mono_stereo: utils::MonoStereo,
-    input_channels: Vec<i8>,
+    input_channels: Vec<u8>,
 }
 
 //TODO: validation of buffer_size
@@ -20,7 +20,7 @@ impl RecorderConfig {
         fpath: String,
         input_device: Device,
         mono_stereo: utils::MonoStereo,
-        input_channels: Vec<i8>,
+        input_channels: Vec<u8>,
     ) -> RecorderConfig {
         let default_input_conf = input_device.default_input_config().unwrap();
         let sample_f = default_input_conf.sample_format();
@@ -50,7 +50,8 @@ pub struct MonitorConfig {
     output_config: cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
     mono_stereo: utils::MonoStereo,
-    input_channels: Vec<i8>,
+    input_channels: Vec<u8>,
+    output_channels: Vec<u8>,
 }
 
 impl MonitorConfig {
@@ -58,7 +59,8 @@ impl MonitorConfig {
         input_device: Device,
         output_device: Device,
         mono_stereo: utils::MonoStereo,
-        input_channels: Vec<i8>,
+        input_channels: Vec<u8>,
+        output_channels: Vec<u8>,
     ) -> MonitorConfig {
         let default_input_conf = input_device.default_input_config().unwrap();
         let default_output_conf = output_device.default_output_config().unwrap();
@@ -76,6 +78,7 @@ impl MonitorConfig {
             sample_format: sample_f,
             mono_stereo: mono_stereo,
             input_channels: input_channels,
+            output_channels: output_channels,
         };
     }
 
@@ -133,6 +136,7 @@ impl Monitor {
             &conf.output,
             &conf.mono_stereo,
             &conf.input_channels,
+            &conf.output_channels,
         );
         return Monitor {
             input_stream: Box::new(input_stream),

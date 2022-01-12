@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 
 use num_traits;
 
-
 pub type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 
 pub fn show_hosts() {
@@ -61,7 +60,7 @@ fn get_write_stream<T, U>(
     device: &Device,
     device_conf: &StreamConfig,
     writer: &WavWriterHandle,
-    write_conf: WriteConfig,
+    write_conf: ReadWriteConfig,
 ) -> Stream
 where
     T: num_traits::Num + cpal::Sample,
@@ -82,15 +81,15 @@ pub fn make_write_stream<T, U>(
     input_config: &StreamConfig,
     input_device: &Device,
     mono_stereo: &MonoStereo,
-    channels: &Vec<i8>,
+    channels: &Vec<u8>,
     sample_format: &SampleFormat,
     writer: &WavWriterHandle,
 ) -> Stream {
-    let write_conf = WriteConfig {
+    let write_conf = ReadWriteConfig {
         channel_ids: channels.clone(),
         mono_stereo: mono_stereo.clone(),
-        nof_channels: input_config.channels as i8,
-        sample_index: Box::<i8>::new(1),
+        nof_channels: input_config.channels as u8,
+        sample_index: Box::<u8>::new(1),
     };
 
     return match sample_format {
@@ -109,8 +108,8 @@ pub fn make_write_stream<T, U>(
 fn get_buf_input_stream<T>(
     device: &Device,
     device_conf: &StreamConfig,
-    write_conf: WriteConfig,
-    producer: Producer<T>,
+    write_conf: ReadWriteConfig,
+    producer: Producer<(u8, T)>,
 ) -> Stream
 where
     T: num_traits::Num,
@@ -132,7 +131,8 @@ where
 fn get_buf_output_stream<T>(
     output: &Device,
     output_conf: &StreamConfig,
-    consumer: Consumer<T>,
+    mut read_conf: ReadWriteConfig,
+    consumer: Consumer<(u8, T)>,
 ) -> Stream
 where
     T: num_traits::Num,
@@ -144,21 +144,22 @@ where
     return output
         .build_output_stream(
             &output_conf,
-            move |data, _: &_| read_data_from_buf::<T>(data, &mut consumer),
+            move |data, _: &_| read_data_from_buf::<T>(data, &mut consumer, &mut read_conf),
             err_fn,
         )
         .unwrap();
 }
 
-fn get_monitor_ringbuf<T>(latency_samples: usize) -> (Producer<T>, Consumer<T>)
+fn get_monitor_ringbuf<T, U>(latency_samples: usize) -> (Producer<(T, U)>, Consumer<(T, U)>)
 where
     T: num_traits::Num,
+    U: num_traits::Num,
 {
-    let buff = RingBuffer::<T>::new(latency_samples * 2);
+    let buff = RingBuffer::<(T, U)>::new(latency_samples * 2);
     let (mut producer, consumer) = buff.split();
 
     for _ in 0..latency_samples {
-        producer.push(T::zero());
+        producer.push((T::zero(), U::zero()));
     }
 
     return (producer, consumer);
@@ -169,7 +170,8 @@ fn get_monitor_streams<T>(
     output_device: &Device,
     input_config: &StreamConfig,
     output_config: &StreamConfig,
-    write_config: WriteConfig
+    write_config: ReadWriteConfig,
+    read_config: ReadWriteConfig,
 ) -> (Stream, Stream)
 where
     T: num_traits::Num,
@@ -177,17 +179,18 @@ where
     T: std::marker::Send,
     T: 'static,
 {
-    let latency = 60.0;
+    let latency = 50.0;
     let frames = (latency / 1_000.0) * (input_config.sample_rate.0 as f32);
-    let latency_samples = frames as usize * input_config.channels as usize;
 
-    let (producer, consumer) = get_monitor_ringbuf::<T>(latency_samples);
+    let nof_samples = frames as usize * input_config.channels as usize;
+    let latency_samples = nof_samples * std::mem::size_of::<(u8, T)>();
+
+    let (producer, consumer) = get_monitor_ringbuf::<u8, T>(latency_samples);
     (
         get_buf_input_stream::<T>(input_device, input_config, write_config, producer),
-        get_buf_output_stream::<T>(output_device, output_config, consumer),
+        get_buf_output_stream::<T>(output_device, output_config, read_config, consumer),
     )
 }
-
 
 pub fn make_monitor_streams(
     input_config: &StreamConfig,
@@ -196,43 +199,46 @@ pub fn make_monitor_streams(
     input_device: &Device,
     output_device: &Device,
     mono_stereo: &MonoStereo,
-    channels: &Vec<i8>,
+    input_channels: &Vec<u8>,
+    output_channels: &Vec<u8>,
 ) -> (Stream, Stream) {
-
-    let write_conf = WriteConfig {
-        channel_ids: channels.clone(),
+    let write_conf = ReadWriteConfig {
+        channel_ids: input_channels.clone(),
         mono_stereo: mono_stereo.clone(),
-        nof_channels: input_config.channels as i8,
-        sample_index: Box::<i8>::new(1),
+        nof_channels: input_config.channels as u8,
+        sample_index: Box::<u8>::new(1),
+    };
+    let read_conf = ReadWriteConfig {
+        channel_ids: output_channels.clone(),
+        mono_stereo: mono_stereo.clone(),
+        nof_channels: output_config.channels as u8,
+        sample_index: Box::<u8>::new(1),
     };
     let (monitor_input, monitor_output) = match sample_format {
-        cpal::SampleFormat::F32 => {
-            get_monitor_streams::<f32>(
-                input_device,
-                output_device,
-                input_config,
-                output_config,
-                write_conf
-            )
-        }
-        cpal::SampleFormat::I16 => {
-            get_monitor_streams::<i16>(
-                input_device,
-                output_device,
-                input_config,
-                output_config,
-                write_conf
-            )
-        }
-        cpal::SampleFormat::U16 => {
-            get_monitor_streams::<u16>(
-                input_device,
-                output_device,
-                input_config,
-                output_config,
-                write_conf
-            )
-        }
+        cpal::SampleFormat::F32 => get_monitor_streams::<f32>(
+            input_device,
+            output_device,
+            input_config,
+            output_config,
+            write_conf,
+            read_conf,
+        ),
+        cpal::SampleFormat::I16 => get_monitor_streams::<i16>(
+            input_device,
+            output_device,
+            input_config,
+            output_config,
+            write_conf,
+            read_conf,
+        ),
+        cpal::SampleFormat::U16 => get_monitor_streams::<u16>(
+            input_device,
+            output_device,
+            input_config,
+            output_config,
+            write_conf,
+            read_conf,
+        ),
     };
     return (monitor_input, monitor_output);
 }
@@ -275,25 +281,25 @@ impl Clone for MonoStereo {
 //     }
 // }
 
-struct WriteConfig {
+struct ReadWriteConfig {
     mono_stereo: MonoStereo,
-    channel_ids: Vec<i8>,
-    nof_channels: i8,
-    sample_index: Box<i8>,
+    channel_ids: Vec<u8>,
+    nof_channels: u8,
+    sample_index: Box<u8>,
 }
 
-impl WriteConfig {
+impl ReadWriteConfig {
     //loops over number of channels starting from 1 to nof_channels
     fn cnt_increment(&mut self) {
         *self.sample_index += 1;
-        if *self.sample_index > self.nof_channels {
+        if *self.sample_index > self.nof_channels as u8 {
             *self.sample_index = 1;
         }
     }
 }
 
 //Used for write streams
-fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle, conf: &mut WriteConfig)
+fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle, conf: &mut ReadWriteConfig)
 where
     T: cpal::Sample,
     U: cpal::Sample + hound::Sample,
@@ -318,30 +324,44 @@ where
 }
 
 //Used for monitor streams
-fn write_input_data_to_buf<T>(data: &[T], producer: &mut Producer<T>, conf: &mut WriteConfig)
-where
+fn write_input_data_to_buf<T>(
+    data: &[T],
+    producer: &mut Producer<(u8, T)>,
+    conf: &mut ReadWriteConfig,
+) where
     T: cpal::Sample,
 {
     for &sample in data {
-        let cnt = *conf.sample_index;
-
-        if conf.channel_ids.contains(&cnt) {
-            producer.push(sample).ok();
+        if conf.channel_ids.contains(&*conf.sample_index) {
+            producer.push((*conf.sample_index, sample)).ok();
+            conf.cnt_increment();
 
             if let MonoStereo::MONO = conf.mono_stereo {
-                producer.push(sample).ok();
+                producer.push((*conf.sample_index, sample)).ok();
             }
+        } else {
+            conf.cnt_increment();
         }
-        conf.cnt_increment();
     }
 }
-fn read_data_from_buf<T>(data: &mut [T], consumer: &mut Consumer<T>)
-where
+
+fn read_data_from_buf<T>(
+    data: &mut [T],
+    consumer: &mut Consumer<(u8, T)>,
+    conf: &mut ReadWriteConfig,
+) where
     T: cpal::Sample,
 {
     for sample in data {
         *sample = match consumer.pop() {
-            Some(s) => s,
+            Some(s) => {
+                if s.0 == *conf.sample_index {
+                    conf.cnt_increment();
+                    s.1
+                } else {
+                    continue;
+                }
+            }
             None => continue,
         };
     }
