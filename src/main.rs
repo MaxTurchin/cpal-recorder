@@ -10,11 +10,8 @@ fn main() {
     utils::show_hosts();
     utils::show_devices();
 
-    let wav_path = "./wav.wav".to_string();
     let host = cpal::default_host();
-
-    let mono_stereo = utils::MonoStereo::MONO;
-    let input_channels = vec![1];
+    let mono_stereo = utils::MonoStereo::STEREO;
 
     println!(
         "{:?}",
@@ -31,26 +28,13 @@ fn main() {
             .unwrap()
     );
 
-    let monitor_conf = recorder::MonitorConfig::new(
-        host.default_input_device().unwrap(),
-        host.default_output_device().unwrap(),
-        mono_stereo.clone(),
-        input_channels.clone(),
-    );
-
-    let recorder_conf = recorder::RecorderConfig::new(
-        wav_path.clone(),
-        host.default_input_device().unwrap(),
-        mono_stereo.clone(),
-        input_channels.clone(),
-    );
 
     let mut track = track::Track::new(
         "track".to_string(),
         &host,
         "Analogue 1 + 2 (Focusrite Usb Audio)".to_string(),
         "Speakers (Focusrite Usb Audio)".to_string(),
-        vec![1],
+        vec![1, 2],
         mono_stereo.clone(),
     );
 
@@ -65,10 +49,6 @@ fn main() {
                 modifiers: _no_modifiers,
             }) => {
                 println!("Rec...");
-                // rec.start_recording();
-                // monitor.start_monitor();
-                // let mon = recorder::Monitor::new(&monitor_conf);
-                // let rec = recorder::Recorder::new(&recorder_conf);
                 track.start_monitor();
                 track.start_recording();
 

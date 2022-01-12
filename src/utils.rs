@@ -1,9 +1,12 @@
 use cpal::traits::{DeviceTrait, HostTrait};
-use cpal::{Device, Sample, SampleFormat, Stream, StreamConfig};
+use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use ringbuf::{Consumer, Producer, RingBuffer};
 use std::fs::File;
 use std::io::BufWriter;
 use std::sync::{Arc, Mutex};
+
+use num_traits;
+
 
 pub type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 
@@ -54,52 +57,22 @@ pub fn wav_spec_from_config(config: &StreamConfig, sample_f: &SampleFormat) -> h
     }
 }
 
-fn get_write_stream_i16(
+fn get_write_stream<T, U>(
     device: &Device,
     device_conf: &StreamConfig,
     writer: &WavWriterHandle,
     write_conf: WriteConfig,
-) -> Stream {
+) -> Stream
+where
+    T: num_traits::Num + cpal::Sample,
+    U: num_traits::Num + cpal::Sample + hound::Sample,
+{
     let writer = writer.clone();
     let mut write_conf = write_conf;
     return device
         .build_input_stream(
             &device_conf,
-            move |data, _: &_| write_input_data::<i16, i16>(data, &writer, &mut write_conf),
-            err_fn,
-        )
-        .unwrap();
-}
-
-fn get_write_stream_u16(
-    device: &Device,
-    device_conf: &StreamConfig,
-    writer: &WavWriterHandle,
-    write_conf: WriteConfig,
-) -> Stream {
-    let writer = writer.clone();
-    let mut write_conf = write_conf;
-    return device
-        .build_input_stream(
-            &device_conf,
-            move |data, _: &_| write_input_data::<u16, i16>(data, &writer, &mut write_conf),
-            err_fn,
-        )
-        .unwrap();
-}
-
-fn get_write_stream_f32(
-    device: &Device,
-    device_conf: &StreamConfig,
-    writer: &WavWriterHandle,
-    write_conf: WriteConfig,
-) -> Stream {
-    let writer = writer.clone();
-    let mut write_conf = write_conf;
-    return device
-        .build_input_stream(
-            &device_conf,
-            move |data, _: &_| write_input_data::<f32, f32>(data, &writer, &mut write_conf),
+            move |data, _: &_| write_input_data::<T, U>(data, &writer, &mut write_conf),
             err_fn,
         )
         .unwrap();
@@ -121,138 +94,97 @@ pub fn make_write_stream<T, U>(
     };
 
     return match sample_format {
-        SampleFormat::F32 => get_write_stream_f32(input_device, input_config, writer, write_conf),
-        SampleFormat::I16 => get_write_stream_i16(input_device, input_config, writer, write_conf),
-        SampleFormat::U16 => get_write_stream_u16(input_device, input_config, writer, write_conf),
+        SampleFormat::F32 => {
+            get_write_stream::<f32, f32>(input_device, input_config, writer, write_conf)
+        }
+        SampleFormat::I16 => {
+            get_write_stream::<i16, i16>(input_device, input_config, writer, write_conf)
+        }
+        SampleFormat::U16 => {
+            get_write_stream::<u16, i16>(input_device, input_config, writer, write_conf)
+        }
     };
 }
 
-fn get_monitor_input_stream_f32(
+fn get_buf_input_stream<T>(
     device: &Device,
     device_conf: &StreamConfig,
     write_conf: WriteConfig,
-    producer: Producer<f32>,
-) -> Stream {
+    producer: Producer<T>,
+) -> Stream
+where
+    T: num_traits::Num,
+    T: cpal::Sample,
+    T: std::marker::Send,
+    T: 'static,
+{
     let mut write_conf = write_conf;
     let mut producer = producer;
     return device
         .build_input_stream(
             &device_conf,
-            move |data, _: &_| write_input_data_to_buf::<f32>(data, &mut producer, &mut write_conf),
+            move |data, _: &_| write_input_data_to_buf::<T>(data, &mut producer, &mut write_conf),
             err_fn,
         )
         .unwrap();
 }
 
-fn get_monitor_output_stream_f32(
+fn get_buf_output_stream<T>(
     output: &Device,
     output_conf: &StreamConfig,
-    consumer: Consumer<f32>,
-) -> Stream {
+    consumer: Consumer<T>,
+) -> Stream
+where
+    T: num_traits::Num,
+    T: cpal::Sample,
+    T: std::marker::Send,
+    T: 'static,
+{
     let mut consumer = consumer;
     return output
         .build_output_stream(
             &output_conf,
-            move |data, _: &_| read_data_from_buf::<f32>(data, &mut consumer),
+            move |data, _: &_| read_data_from_buf::<T>(data, &mut consumer),
             err_fn,
         )
         .unwrap();
 }
 
-fn get_monitor_input_stream_i16(
-    device: &Device,
-    device_conf: &StreamConfig,
-    write_conf: WriteConfig,
-    producer: Producer<i16>,
-) -> Stream {
-    let mut write_conf = write_conf;
-    let mut producer = producer;
-    return device
-        .build_input_stream(
-            &device_conf,
-            move |data, _: &_| write_input_data_to_buf::<i16>(data, &mut producer, &mut write_conf),
-            err_fn,
-        )
-        .unwrap();
-}
-
-fn get_monitor_output_stream_i16(
-    output: &Device,
-    output_conf: &StreamConfig,
-    consumer: Consumer<i16>,
-) -> Stream {
-    let mut consumer = consumer;
-    return output
-        .build_output_stream(
-            &output_conf,
-            move |data, _: &_| read_data_from_buf::<i16>(data, &mut consumer),
-            err_fn,
-        )
-        .unwrap();
-}
-
-fn get_monitor_input_stream_u16(
-    device: &Device,
-    device_conf: &StreamConfig,
-    write_conf: WriteConfig,
-    producer: Producer<u16>,
-) -> Stream {
-    let mut write_conf = write_conf;
-    let mut producer = producer;
-    return device
-        .build_input_stream(
-            &device_conf,
-            move |data, _: &_| write_input_data_to_buf::<u16>(data, &mut producer, &mut write_conf),
-            err_fn,
-        )
-        .unwrap();
-}
-
-fn get_monitor_output_stream_u16(
-    output: &Device,
-    output_conf: &StreamConfig,
-    consumer: Consumer<u16>,
-) -> Stream {
-    let mut consumer = consumer;
-    return output
-        .build_output_stream(
-            &output_conf,
-            move |data, _: &_| read_data_from_buf::<u16>(data, &mut consumer),
-            err_fn,
-        )
-        .unwrap();
-}
-
-fn get_monitor_ringbuff_f32(latency_samples: usize) -> (Producer<f32>, Consumer<f32>) {
-    let buff = RingBuffer::<f32>::new(latency_samples * 2);
+fn get_monitor_ringbuf<T>(latency_samples: usize) -> (Producer<T>, Consumer<T>)
+where
+    T: num_traits::Num,
+{
+    let buff = RingBuffer::<T>::new(latency_samples * 2);
     let (mut producer, consumer) = buff.split();
 
     for _ in 0..latency_samples {
-        producer.push(0.0).unwrap();
+        producer.push(T::zero());
     }
 
     return (producer, consumer);
 }
-fn get_monitor_ringbuff_i16(latency_samples: usize) -> (Producer<i16>, Consumer<i16>) {
-    let buff = RingBuffer::<i16>::new(latency_samples * 2);
-    let (mut producer, consumer) = buff.split();
 
-    for _ in 0..latency_samples {
-        producer.push(0).unwrap();
-    }
-
-    return (producer, consumer);
+fn get_monitor_streams<T>(
+    input_device: &Device,
+    output_device: &Device,
+    input_config: &StreamConfig,
+    output_config: &StreamConfig,
+    write_config: WriteConfig,
+    latency_samples: usize,
+) -> (Stream, Stream)
+where
+    T: num_traits::Num,
+    T: cpal::Sample,
+    T: std::marker::Send,
+    T: 'static,
+{
+    let (producer, consumer) = get_monitor_ringbuf::<T>(latency_samples);
+    (
+        get_buf_input_stream::<T>(input_device, input_config, write_config, producer),
+        get_buf_output_stream::<T>(output_device, output_config, consumer),
+    )
 }
-fn get_monitor_ringbuff_u16(latency_samples: usize) -> (Producer<u16>, Consumer<u16>) {
-    let buff = RingBuffer::<u16>::new(latency_samples * 2);
-    let (mut producer, consumer) = buff.split();
 
-    for _ in 0..latency_samples {
-        producer.push(0).unwrap();
-    }
-
-    return (producer, consumer);
-}
 
 pub fn make_monitor_streams(
     input_config: &StreamConfig,
@@ -263,46 +195,51 @@ pub fn make_monitor_streams(
     mono_stereo: &MonoStereo,
     channels: &Vec<i8>,
 ) -> (Stream, Stream) {
-    let latency = 30.0;
+    let latency = 60.0;
     let frames = (latency / 1_000.0) * (input_config.sample_rate.0 as f32);
 
-    let mut conf = WriteConfig {
+    let write_conf = WriteConfig {
         channel_ids: channels.clone(),
         mono_stereo: mono_stereo.clone(),
         nof_channels: input_config.channels as i8,
         sample_index: Box::<i8>::new(1),
     };
-
-    let (monitor_input, monitor_output): (Stream, Stream) = match sample_format {
+    let (monitor_input, monitor_output) = match sample_format {
         cpal::SampleFormat::F32 => {
             let latency_samples = (frames as f32) as usize * input_config.channels as usize;
-            let (producer, consumer) = get_monitor_ringbuff_f32(latency_samples);
-            (
-                get_monitor_input_stream_f32(input_device, input_config, conf, producer),
-                get_monitor_output_stream_f32(output_device, output_config, consumer),
+            get_monitor_streams::<f32>(
+                input_device,
+                output_device,
+                input_config,
+                output_config,
+                write_conf,
+                latency_samples,
             )
         }
-
         cpal::SampleFormat::I16 => {
             let latency_samples = (frames as i16) as usize * input_config.channels as usize;
-            let (producer, consumer) = get_monitor_ringbuff_i16(latency_samples);
-
-            (
-                get_monitor_input_stream_i16(input_device, input_config, conf, producer),
-                get_monitor_output_stream_i16(output_device, output_config, consumer),
+            get_monitor_streams::<i16>(
+                input_device,
+                output_device,
+                input_config,
+                output_config,
+                write_conf,
+                latency_samples,
             )
         }
-
         cpal::SampleFormat::U16 => {
-            let latency_samples = (frames as i16) as usize * input_config.channels as usize;
-            let (producer, consumer) = get_monitor_ringbuff_u16(latency_samples);
-
-            (
-                get_monitor_input_stream_u16(input_device, input_config, conf, producer),
-                get_monitor_output_stream_u16(output_device, output_config, consumer),
+            let latency_samples = (frames as u16) as usize * input_config.channels as usize;
+            get_monitor_streams::<u16>(
+                input_device,
+                output_device,
+                input_config,
+                output_config,
+                write_conf,
+                latency_samples,
             )
         }
     };
+
     return (monitor_input, monitor_output);
 }
 
@@ -334,15 +271,15 @@ impl Clone for MonoStereo {
     }
 }
 
-impl MonoStereo {
-    pub fn channels_to_enum(nof_channels: cpal::ChannelCount) -> MonoStereo {
-        match nof_channels {
-            1 => MonoStereo::MONO,
-            2 => MonoStereo::STEREO,
-            _ => MonoStereo::INVALID,
-        }
-    }
-}
+// impl MonoStereo {
+//     pub fn channels_to_enum(nof_channels: cpal::ChannelCount) -> MonoStereo {
+//         match nof_channels {
+//             1 => MonoStereo::MONO,
+//             2 => MonoStereo::STEREO,
+//             _ => MonoStereo::INVALID,
+//         }
+//     }
+// }
 
 struct WriteConfig {
     mono_stereo: MonoStereo,

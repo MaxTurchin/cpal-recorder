@@ -37,9 +37,9 @@ impl RecorderConfig {
         };
     }
 
-    pub fn set_buffer_size(&mut self, buffer_s: &BufferSize) {
-        self.input_config.buffer_size = buffer_s.clone();
-    }
+    // pub fn set_buffer_size(&mut self, buffer_s: &BufferSize) {
+    //     self.input_config.buffer_size = buffer_s.clone();
+    // }
 }
 
 //TODO: validation of buffer_size

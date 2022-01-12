@@ -748,6 +748,7 @@ dependencies = [
  "cpal",
  "crossterm",
  "hound",
+ "num-traits",
  "ringbuf",
 ]
 

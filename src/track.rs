@@ -2,12 +2,8 @@
 use crate::{recorder, utils};
 
 use cpal::traits::{DeviceTrait, HostTrait};
-use cpal::{Device, Host, SampleFormat, Stream, StreamConfig};
-use crossterm::event::{read, Event, KeyCode, KeyEvent};
-use std::mem::replace;
-use std::{thread, time};
+use cpal::Host;
 
-use str;
 
 pub struct Track {
     name: String,
