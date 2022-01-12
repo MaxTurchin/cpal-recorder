@@ -169,8 +169,7 @@ fn get_monitor_streams<T>(
     output_device: &Device,
     input_config: &StreamConfig,
     output_config: &StreamConfig,
-    write_config: WriteConfig,
-    latency_samples: usize,
+    write_config: WriteConfig
 ) -> (Stream, Stream)
 where
     T: num_traits::Num,
@@ -178,6 +177,10 @@ where
     T: std::marker::Send,
     T: 'static,
 {
+    let latency = 60.0;
+    let frames = (latency / 1_000.0) * (input_config.sample_rate.0 as f32);
+    let latency_samples = frames as usize * input_config.channels as usize;
+
     let (producer, consumer) = get_monitor_ringbuf::<T>(latency_samples);
     (
         get_buf_input_stream::<T>(input_device, input_config, write_config, producer),
@@ -195,8 +198,6 @@ pub fn make_monitor_streams(
     mono_stereo: &MonoStereo,
     channels: &Vec<i8>,
 ) -> (Stream, Stream) {
-    let latency = 60.0;
-    let frames = (latency / 1_000.0) * (input_config.sample_rate.0 as f32);
 
     let write_conf = WriteConfig {
         channel_ids: channels.clone(),
@@ -206,40 +207,33 @@ pub fn make_monitor_streams(
     };
     let (monitor_input, monitor_output) = match sample_format {
         cpal::SampleFormat::F32 => {
-            let latency_samples = (frames as f32) as usize * input_config.channels as usize;
             get_monitor_streams::<f32>(
                 input_device,
                 output_device,
                 input_config,
                 output_config,
-                write_conf,
-                latency_samples,
+                write_conf
             )
         }
         cpal::SampleFormat::I16 => {
-            let latency_samples = (frames as i16) as usize * input_config.channels as usize;
             get_monitor_streams::<i16>(
                 input_device,
                 output_device,
                 input_config,
                 output_config,
-                write_conf,
-                latency_samples,
+                write_conf
             )
         }
         cpal::SampleFormat::U16 => {
-            let latency_samples = (frames as u16) as usize * input_config.channels as usize;
             get_monitor_streams::<u16>(
                 input_device,
                 output_device,
                 input_config,
                 output_config,
-                write_conf,
-                latency_samples,
+                write_conf
             )
         }
     };
-
     return (monitor_input, monitor_output);
 }
 
