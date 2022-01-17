@@ -1,16 +1,11 @@
 [package]
-name = "recorder"
+name = "example2"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
-# cpal = {version = "0.13.4", features = ["asio"]}
 cpal = "0.13.4"
 hound = "3.4.0"
-anyhow = "1.0.52"
-crossterm = "0.16.0"
-ringbuf = "0.2.6"
-num-traits = "0.2"
+multiqueue = "0.3.2"
