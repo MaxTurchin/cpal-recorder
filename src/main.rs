@@ -198,22 +198,19 @@ impl Track {
         Track {
             id: id,
             name: name.clone(),
-            files: vec![format!("{}_1.wav", name)],
+            files: Vec::<String>::new(),
             wav_spec: wav_spec,
         }
     }
 
-    pub fn add_file(&mut self) {
-        let fname = format!("{}_{}.wav", self.name, self.files.len() + 1);
-        self.files.push(fname);
-    }
-
     pub fn record<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
-        &self,
+        &mut self,
     ) -> (
         std::sync::mpsc::Sender<multiqueue::BroadcastReceiver<(u8, T)>>,
         std::sync::mpsc::Sender<()>,
     ) {
+        self.add_file();
+
         let writer = hound::WavWriter::create(self.files.last().unwrap(), self.wav_spec).unwrap();
         let writer = Arc::new(Mutex::new(Some(writer)));
 
@@ -222,6 +219,11 @@ impl Track {
         write_thread(writer, thread_rx, term_rx);
 
         return (thread_tx, term_tx);
+    }
+
+    fn add_file(&mut self) {
+        let fname = format!("{}_{}.wav", self.name, self.files.len() + 1);
+        self.files.push(fname);
     }
 }
 
