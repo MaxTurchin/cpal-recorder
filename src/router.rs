@@ -8,7 +8,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::io::Error;
 use std::thread;
 
-use crate::busses::{InputBus, OutputBus};
+use crate::busses::{BusConfig, InputBus, OutputBus};
 use crate::tracks::Track;
 
 struct RouteMap {
@@ -117,14 +117,17 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         let bus_id = self.input_busses.len() as u8;
         let device = get_input_device(&self.config.host, &self.config.in_device);
 
-        let (bus_rec_tx, bus_rec_rx) = multiqueue::broadcast_queue::<T>(4000);
-        let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<T>(4000);
+        let (bus_rec_tx, bus_rec_rx) = multiqueue::broadcast_queue::<T>(10_000);
+        let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<T>(10_000);
         let txs = vec![bus_rec_tx, bus_mon_tx];
+
+        let bus_conf = BusConfig::get_bus_config(&(channel_ids.len() as u8));
 
         let in_bus = InputBus::<T>::new(
             bus_id,
             device,
             self.config.in_config.clone(),
+            bus_conf,
             channel_ids,
             txs,
         );
@@ -218,10 +221,10 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
                 let in_bus_id = input.2.get_id();
                 let mut in_bus_rx = Box::new(input.1.clone());
 
-                let tracks = self
-                    .routes
-                    .get_route_track_ids(&in_bus_id, &out_bus_id)
-                    .unwrap();
+                let tracks = match self.routes.get_route_track_ids(&in_bus_id, &out_bus_id) {
+                    Some(t) => t,
+                    None => Vec::new()
+                };
 
                 println!("Run monitor streams");
                 for track_id in tracks.iter() {
