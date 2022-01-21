@@ -8,7 +8,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::io::Error;
 use std::thread;
 
-use crate::busses::{InputBus, OutputBus};
+use crate::busses::{BusConfig, InputBus, OutputBus};
 use crate::tracks::Track;
 
 struct RouteMap {
@@ -121,10 +121,13 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<T>(10_000);
         let txs = vec![bus_rec_tx, bus_mon_tx];
 
+        let bus_conf = BusConfig::get_bus_config(&(channel_ids.len() as u8));
+
         let in_bus = InputBus::<T>::new(
             bus_id,
             device,
             self.config.in_config.clone(),
+            bus_conf,
             channel_ids,
             txs,
         );

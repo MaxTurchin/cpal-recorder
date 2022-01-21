@@ -42,16 +42,17 @@ fn main() {
         sample_format,
     );
     router.new_input_bus(vec![1]);
-    router.new_input_bus(vec![2]);
+    router.new_input_bus(vec![1, 2]);
+
     router.new_output_bus(vec![1, 2]);
 
     router.new_track("Tractor".to_string(), 0, 0);
     router.new_track("Tractor1".to_string(), 1, 0);
-    router.new_track("Tractor2".to_string(), 0, 0);
+    // router.new_track("Tractor2".to_string(), 0, 0);
 
     router.arm_recording(0);
     router.arm_recording(1);
-    router.arm_recording(2);
+    // router.arm_recording(2);
 
     router.arm_monitor(0);
     router.arm_monitor(1);

@@ -6,6 +6,22 @@ use std::sync::mpsc::Receiver;
 
 use std::marker::PhantomData;
 
+pub enum BusConfig {
+    Mono,
+    Stereo,
+}
+
+impl BusConfig {
+    pub fn get_bus_config(nof_channels: &u8) -> BusConfig {
+        println!("nof_channels: {}", nof_channels);
+        match nof_channels {
+            1 => BusConfig::Mono,
+            2 => BusConfig::Stereo,
+            n => panic!("get_bus_config: Oh no invalid nof channels: {}", n),
+        }
+    }
+}
+
 pub struct InputBus<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> {
     id: u8,
     track_ids: Vec<u8>,
@@ -18,17 +34,20 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> InputBus<T> {
     pub fn new(
         id: u8,
         device: Device,
-        config: StreamConfig,
+        stream_config: StreamConfig,
+        bus_config: BusConfig,
         channel_ids: Vec<u8>,
         txs: Vec<BroadcastSender<T>>,
     ) -> InputBus<T> {
-        let nof_channels = config.channels as u8;
+        let nof_channels = stream_config.channels as u8;
         let ch_ids = channel_ids.clone();
 
         let stream = device
             .build_input_stream(
-                &config,
-                move |data, _: &_| broadcast_clb::<T>(data, &txs.clone(), &ch_ids, &nof_channels),
+                &stream_config,
+                move |data, _: &_| {
+                    broadcast_clb::<T>(data, &txs.clone(), &ch_ids, &nof_channels, &bus_config)
+                },
                 err_fn,
             )
             .unwrap();
@@ -126,14 +145,21 @@ fn broadcast_clb<T: cpal::Sample>(
     txs: &Vec<BroadcastSender<T>>,
     in_chs: &Vec<u8>,
     nof_chs: &u8,
+    bus_config: &BusConfig,
 ) {
     let mut cur_ch = 1;
     for &sample in data {
         if in_chs.contains(&cur_ch) {
             for tx in txs {
-                tx.try_send(sample);
-                //ONLY FOR MONO
-                tx.try_send(sample);
+                match bus_config {
+                    BusConfig::Mono => {
+                        tx.try_send(sample);
+                        tx.try_send(sample);
+                    }
+                    BusConfig::Stereo => {
+                        tx.try_send(sample);
+                    }
+                };
             }
             cur_ch += 1;
             if cur_ch > *nof_chs {
@@ -152,13 +178,9 @@ fn playback_clb<T: cpal::Sample>(data: &mut [T], rx: &Receiver<T>) {
     let mut channel_id: u8 = 1;
     for sample in data {
         *sample = match rx.recv().ok() {
-            Some(s) => {
-                // println!("Got sample: {}", s.to_f32());
-                s
-            }
+            Some(s) => s,
             None => continue,
         };
-        // println!("I'm here");
     }
 }
 
