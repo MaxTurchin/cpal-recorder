@@ -65,7 +65,7 @@ impl Track {
         let (term_tx, term_rx) = std::sync::mpsc::channel();
         let (monitor_tx, monitor_rx) = std::sync::mpsc::channel::<T>();
 
-        monitor_thread(thread_rx, monitor_tx, term_rx, out_chs);
+        monitor_thread(thread_rx, monitor_tx, term_rx);
         self.term_tx.push(term_tx);
 
         (thread_tx, monitor_rx)
@@ -146,7 +146,6 @@ fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
     thread_rx: Receiver<BroadcastReceiver<T>>,
     monitor_tx: Sender<T>,
     term_rx: Receiver<()>,
-    out_chs: Vec<u8>,
 ) {
     thread::spawn(move || {
         let bus_rx: BroadcastReceiver<T> = thread_rx.recv().unwrap();
