@@ -134,8 +134,8 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         let bus_id = self.input_busses.len() as u8;
         let device = get_input_device(&self.config.host, &self.config.in_device);
 
-        let (bus_rec_tx, bus_rec_rx) = multiqueue::broadcast_queue::<T>(10_000);
-        let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<T>(10_000);
+        let (bus_rec_tx, bus_rec_rx) = multiqueue::broadcast_queue::<T>(50_000);
+        let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<T>(50_000);
         let txs = vec![bus_rec_tx, bus_mon_tx];
 
         let bus_conf = BusConfig::get_bus_config(&(channel_ids.len() as u8));
