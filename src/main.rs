@@ -64,6 +64,11 @@ fn main() {
     router.stop_monitor();
     println!("Done!");
 
+
+    router.set_monitor(1, false);
+    router.set_recording(1, false);
+
+
     router.monitor();
     router.record();
     thread::sleep(std::time::Duration::from_secs(10));

@@ -11,6 +11,9 @@ use std::thread;
 use crate::busses::{BusConfig, InputBus, OutputBus};
 use crate::tracks::Track;
 
+
+
+
 struct RouteMap {
     routes: Vec<(u8, u8, Vec<u8>)>, // (input bus, output bus, track_list)
 }
@@ -22,10 +25,12 @@ impl RouteMap {
         }
     }
 
+
     pub fn add_route(&mut self, in_bus_id: &u8, out_bus_id: &u8) {
         self.routes
             .push((*in_bus_id, *out_bus_id, Vec::<u8>::new()))
     }
+
 
     pub fn add_track_to_route(&mut self, in_id: &u8, out_id: &u8, track_id: &u8) {
         for route in self.routes.iter_mut() {
@@ -35,6 +40,7 @@ impl RouteMap {
             }
         }
     }
+
 
     pub fn get_track_busses(&self, track_id: &u8) -> Option<(u8, u8)> {
         for route in self.routes.iter() {
@@ -46,6 +52,7 @@ impl RouteMap {
         return None;
     }
 
+
     pub fn get_route_track_ids(&self, in_id: &u8, out_id: &u8) -> Option<Vec<u8>> {
         for route in self.routes.iter() {
             let (input, output) = (route.0, route.1);
@@ -56,6 +63,9 @@ impl RouteMap {
         return None;
     }
 }
+
+
+
 
 struct MonitorLink<T> {
     out_bus_id: u8,
@@ -69,6 +79,9 @@ impl<T> MonitorLink<T> {
     }
 }
 
+
+
+
 pub struct RouteConfig {
     pub host: Host,
     pub in_config: StreamConfig,
@@ -77,6 +90,9 @@ pub struct RouteConfig {
     pub out_device: String,
     pub sample_format: SampleFormat,
 }
+
+
+
 
 pub struct Router<T: 'static + cpal::Sample + hound::Sample + Send + Sync> {
     config: RouteConfig,
@@ -113,6 +129,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         }
     }
 
+
     pub fn new_input_bus(&mut self, channel_ids: Vec<u8>) {
         let bus_id = self.input_busses.len() as u8;
         let device = get_input_device(&self.config.host, &self.config.in_device);
@@ -135,6 +152,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
             .push((bus_rec_rx.clone(), bus_mon_rx.clone(), in_bus));
     }
 
+
     pub fn new_output_bus(&mut self, channel_ids: Vec<u8>) {
         let bus_id = self.output_busses.len() as u8;
         let device = get_output_device(&self.config.host, &self.config.out_device);
@@ -149,6 +167,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         );
         self.output_busses.push((bus_tx, out_bus));
     }
+
 
     pub fn new_track(&mut self, track_name: String, in_bus_id: u8, out_bus_id: u8) {
         let track_id = self.tracks.len() as u8;
@@ -178,6 +197,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         self.tracks.push(track);
     }
 
+
     pub fn record(&mut self) {
         for input_bus in self.input_busses.iter_mut() {
             let track_ids = input_bus.2.get_track_ids();
@@ -195,6 +215,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         }
     }
 
+
     pub fn stop_recording(&mut self) {
         for input_bus in self.input_busses.iter() {
             let track_ids = input_bus.2.get_track_ids();
@@ -204,6 +225,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
             }
         }
     }
+
 
     pub fn monitor(&mut self) {
         let mut links = Vec::<MonitorLink<T>>::new();
@@ -252,6 +274,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         self._run_monitor_out_streams(links);
     }
 
+
     fn _run_monitor_out_streams(&mut self, mut links: Vec<MonitorLink<T>>) {
         println!("Run mix streams");
         while let Ok(link) = links.pop().ok_or("") {
@@ -267,17 +290,21 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         }
     }
 
+
     pub fn set_monitor(&mut self, track_id: u8, state: bool) {
         self.tracks[track_id as usize].set_monitor(state);
     }
+
 
     pub fn set_recording(&mut self, track_id: u8, state: bool) {
         self.tracks[track_id as usize].set_rec(state);
     }
 
+
     pub fn stop_monitor(&mut self) {
         //terminates mix monitor threads
         while let Ok(term_tx) = self.monitor_txs.pop().ok_or(err_fn) {
+            println!("Terminating mix_thread");
             term_tx.send(());
         }
 
@@ -286,11 +313,14 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
             let track_ids = input_bus.2.get_track_ids();
             for track_id in track_ids.iter() {
                 self.tracks[*track_id as usize].stop_monitor();
-                println!("Terminated");
+                println!("Terminated Monitor (Track {})", track_id);
             }
         }
     }
 }
+
+
+
 
 fn mix_thread<T: 'static + cpal::Sample + Send>(
     thread_rx: Receiver<Vec<Receiver<T>>>,
@@ -310,7 +340,7 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
                 loop {
                     let tup = match rx.recv() {
                         Ok(t) => t,
-                        Err(e) => panic!("mix_thread: Oh no! {}", e),
+                        Err(_) => continue,
                     };
                     if tup.to_f32().is_nan() {
                         continue;
@@ -332,9 +362,11 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
     });
 }
 
+
 pub fn err_fn(error: Error) {
     eprintln!("an error occurred on stream: {}", error);
 }
+
 
 fn get_input_device(host: &Host, device_name: &String) -> Device {
     let mut devices = match host.input_devices() {
@@ -345,6 +377,7 @@ fn get_input_device(host: &Host, device_name: &String) -> Device {
         .find(|x| x.name().map(|y| y == *device_name).unwrap_or(false))
         .unwrap()
 }
+
 
 fn get_output_device(host: &Host, device_name: &String) -> Device {
     let mut devices = match host.output_devices() {

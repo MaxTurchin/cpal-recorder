@@ -21,6 +21,7 @@ pub struct Track {
     monitor: bool,
 }
 
+
 impl Track {
     pub fn new(
         id: u8,
@@ -39,6 +40,7 @@ impl Track {
             monitor: false,
         }
     }
+
 
     pub fn record<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
         &mut self,
@@ -95,10 +97,12 @@ impl Track {
         (thread_tx, monitor_rx)
     }
 
+
     //Must be called after stop_monitor
     pub fn stop_recording(&mut self) {
         self.stop_thread();
     }
+
 
     pub fn stop_monitor(&mut self) {
         self.stop_thread();
@@ -114,13 +118,16 @@ impl Track {
         self.monitor = state;
     }
 
+
     pub fn is_rec_armed(&self) -> bool {
         self.rec
     }
 
+
     pub fn is_monitored(&self) -> bool {
         self.monitor
     }
+
 
     fn stop_thread(&mut self) {
         let tx = match self.term_tx.pop() {
@@ -130,11 +137,13 @@ impl Track {
         tx.send(());
     }
 
+
     fn add_file(&mut self) {
         let fname = format!("{}_{}.wav", self.name, self.files.len() + 1);
         self.files.push(fname);
     }
 }
+
 
 fn write_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
     writer: WavWriterHandle,
@@ -211,6 +220,7 @@ fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
     });
 }
 
+
 pub type WavWriterHandle = Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>;
 
 pub fn wav_spec_from_config(config: &StreamConfig, sample_f: &SampleFormat) -> WavSpec {
@@ -221,6 +231,7 @@ pub fn wav_spec_from_config(config: &StreamConfig, sample_f: &SampleFormat) -> W
         sample_format: sample_format(*sample_f),
     }
 }
+
 
 pub fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
     match format {
