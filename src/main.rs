@@ -50,12 +50,11 @@ fn main() {
     router.new_track("Tractor1".to_string(), 1, 0);
     // router.new_track("Tractor2".to_string(), 0, 0);
 
-    router.arm_recording(0);
-    router.arm_recording(1);
-    // router.arm_recording(2);
+    router.set_recording(0, true);
+    router.set_recording(1, true);
 
-    router.arm_monitor(0);
-    router.arm_monitor(1);
+    router.set_monitor(0, true);
+    router.set_monitor(1, true);
     // thread::sleep(std::time::Duration::from_secs(10));
 
     router.monitor();
@@ -64,6 +63,11 @@ fn main() {
     router.stop_recording();
     router.stop_monitor();
     println!("Done!");
+
+
+    router.set_monitor(1, false);
+    router.set_recording(1, false);
+
 
     router.monitor();
     router.record();
