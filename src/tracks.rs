@@ -5,9 +5,11 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use hound::{WavSpec, WavWriter};
+use hound::{WavReader, WavSpec, WavWriter};
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
+
+
 
 pub struct Track {
     id: u8,
@@ -54,6 +56,28 @@ impl Track {
         thread_tx
     }
 
+
+    pub fn start_playback<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
+        &mut self,
+    ) -> Option<Receiver<T>> {
+        let playback_file = match self.files.last() {
+            Some(f) => f,
+            None => return None,
+        };
+        let reader = match WavReader::open(playback_file) {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+
+        let (term_tx, term_rx) = std::sync::mpsc::channel();
+        let (playback_tx, playback_rx) = std::sync::mpsc::channel::<T>();
+        playback_thread(reader, playback_tx, term_rx);
+        self.term_tx.push(term_tx);
+
+        Some(playback_rx)
+    }
+
+
     pub fn start_monitor<T: 'static + cpal::Sample + Send + Sync>(
         &mut self,
         out_chs: Vec<u8>,
@@ -80,12 +104,14 @@ impl Track {
         self.stop_thread();
     }
 
-    pub fn arm_rec(&mut self) {
-        self.rec = true;
+
+    pub fn set_rec(&mut self, state: bool) {
+        self.rec = state;
     }
 
-    pub fn arm_monitor(&mut self) {
-        self.monitor = true;
+
+    pub fn set_monitor(&mut self, state: bool) {
+        self.monitor = state;
     }
 
     pub fn is_rec_armed(&self) -> bool {
@@ -141,6 +167,27 @@ fn write_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
         }
     });
 }
+
+
+fn playback_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
+    mut reader: WavReader<BufReader<File>>,
+    playback_tx: Sender<T>,
+    term_rx: Receiver<()>,
+) {
+    thread::spawn(move || loop {
+        //hound reads first sample as R, cpal expects L
+        playback_tx.send(cpal::Sample::from(&0.0));
+
+        for sample in reader.samples() {
+            playback_tx.send(sample.unwrap());
+        }
+        match term_rx.try_recv() {
+            Ok(_) => break,
+            Err(_) => continue,
+        }
+    });
+}
+
 
 fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
     thread_rx: Receiver<BroadcastReceiver<T>>,

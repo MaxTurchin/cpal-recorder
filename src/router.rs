@@ -236,6 +236,14 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
 
                         monitor_tx.send(*in_bus_rx.clone());
                         in_bus_rx = Box::new(in_bus_rx.add_stream());
+                    } else if !self.tracks[*track_id as usize].is_rec_armed() {
+                        let playback_rx: Receiver<T> =
+                            match self.tracks[*track_id as usize].start_playback() {
+                                Some(rx) => rx,
+                                None => continue,
+                            };
+                        let links_len = links.len();
+                        links[links_len - 1].rxs_from_monitors.push(playback_rx);
                     }
                 }
                 input.2.play_stream();
@@ -259,12 +267,12 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         }
     }
 
-    pub fn arm_monitor(&mut self, track_id: u8) {
-        self.tracks[track_id as usize].arm_monitor();
+    pub fn set_monitor(&mut self, track_id: u8, state: bool) {
+        self.tracks[track_id as usize].set_monitor(state);
     }
 
-    pub fn arm_recording(&mut self, track_id: u8) {
-        self.tracks[track_id as usize].arm_rec();
+    pub fn set_recording(&mut self, track_id: u8, state: bool) {
+        self.tracks[track_id as usize].set_rec(state);
     }
 
     pub fn stop_monitor(&mut self) {
