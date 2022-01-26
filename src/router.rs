@@ -10,6 +10,9 @@ use std::thread;
 
 use crate::busses::{BusConfig, InputBus, OutputBus};
 use crate::tracks::Track;
+use crate::utils::{
+    get_flushed_broadcast_queue, get_input_device_by_name, get_output_device_by_name,
+};
 
 struct RouteMap {
     routes: Vec<(u8, u8, Vec<u8>)>, // (input bus, output bus, track_list)
@@ -80,7 +83,7 @@ pub struct RouteConfig {
 }
 
 pub struct Router<T: 'static + cpal::Sample + hound::Sample + Send + Sync> {
-    config: RouteConfig,
+    pub config: RouteConfig,
     tracks: Vec<Track>,
     input_busses: Vec<(
         BroadcastReceiver<(u8, T)>,
@@ -122,9 +125,9 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         }
     }
 
-    pub fn new_input_bus(&mut self, channel_ids: Vec<u8>) {
+    pub fn new_input_bus(&mut self, channel_ids: Vec<u8>) -> u8 {
         let bus_id = self.input_busses.len() as u8;
-        let device = get_input_device(&self.config.host, &self.config.in_device);
+        let device = get_input_device_by_name(&self.config.host, &self.config.in_device);
 
         let (bus_rec_tx, bus_rec_rx) = multiqueue::broadcast_queue::<(u8, T)>(1_000_000);
         let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<(u8, T)>(1_000_000);
@@ -144,11 +147,12 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         in_bus.play_stream();
         self.input_busses
             .push((bus_rec_rx.clone(), bus_mon_rx.clone(), in_bus));
+        (self.input_busses.len() - 1) as u8
     }
 
-    pub fn new_output_bus(&mut self, channel_ids: Vec<u8>) {
+    pub fn new_output_bus(&mut self, channel_ids: Vec<u8>) -> u8 {
         let bus_id = self.output_busses.len() as u8;
-        let device = get_output_device(&self.config.host, &self.config.out_device);
+        let device = get_output_device_by_name(&self.config.host, &self.config.out_device);
 
         let (bus_tx, bus_rx) = mpsc::channel::<(u8, T)>();
         let out_bus = OutputBus::<T>::new(
@@ -161,6 +165,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
 
         out_bus.play_stream();
         self.output_busses.push((bus_tx, out_bus));
+        (self.output_busses.len() - 1) as u8
     }
 
     pub fn new_track(&mut self, track_name: String, in_bus_id: u8, out_bus_id: u8) {
@@ -231,14 +236,15 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
 
             for input in self.input_busses.iter() {
                 let in_bus_id = input.2.get_id();
-                let mut in_bus_rx = Box::new(input.1.clone());
+
+                let mut in_bus_rx = Box::new(get_flushed_broadcast_queue(input.1.clone()));
 
                 let tracks = match self.routes.get_route_track_ids(&in_bus_id, &out_bus_id) {
                     Some(t) => t,
                     None => Vec::new(),
                 };
 
-                println!("Run monitor streams");
+                // println!("Run monitor streams");
                 for track_id in tracks.iter() {
                     if self.tracks[*track_id as usize].is_monitored() {
                         let (monitor_tx, monitor_rx) = self.tracks[*track_id as usize]
@@ -265,7 +271,6 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
     }
 
     fn _run_monitor_out_streams(&mut self, mut links: Vec<MonitorLink<T>>) {
-        println!("Run mix streams");
         while let Ok(link) = links.pop().ok_or("") {
             let (out_id, out_tx, monitor_rxs) = link.as_tup();
             // println!("monitor_rxs      : {}", monitor_rxs.len());
@@ -293,7 +298,6 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
             println!("Terminating mix_thread");
             term_tx.send(());
         }
-
         //terminates track monitor threads
         for input_bus in self.input_busses.iter() {
             let track_ids = input_bus.2.get_track_ids();
@@ -303,6 +307,18 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
             }
         }
     }
+
+    pub fn get_io_channels(&self) -> (Vec<u8>, Vec<u8>) {
+        //(input_channel_ids, output_channel_ids)
+        (
+            (1..=self.config.in_config.channels as u8).collect(),
+            (1..=self.config.out_config.channels as u8).collect(),
+        )
+    }
+
+    pub fn get_tracks(&self) -> &Vec<Track> {
+        &self.tracks
+    }
 }
 
 fn mix_thread<T: 'static + cpal::Sample + Send>(
@@ -311,6 +327,7 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
     out_tx: Sender<(u8, T)>,
     out_channels: Vec<u8>,
 ) {
+    println!("Mix Thread spawned!");
     thread::spawn(move || {
         //TODO: support i16 and u16 sample formats
 
@@ -349,6 +366,7 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
             }
 
             if let Ok(_) = term_rx.try_recv() {
+                println!("Mix Thread killed!");
                 break;
             }
 
@@ -362,24 +380,4 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
 
 pub fn err_fn(error: Error) {
     eprintln!("an error occurred on stream: {}", error);
-}
-
-fn get_input_device(host: &Host, device_name: &String) -> Device {
-    let mut devices = match host.input_devices() {
-        Ok(d) => d,
-        Err(e) => panic!("Input devices Not Found: {}", e),
-    };
-    devices
-        .find(|x| x.name().map(|y| y == *device_name).unwrap_or(false))
-        .unwrap()
-}
-
-fn get_output_device(host: &Host, device_name: &String) -> Device {
-    let mut devices = match host.output_devices() {
-        Ok(d) => d,
-        Err(e) => panic!("Output devices Not Found: {}", e),
-    };
-    devices
-        .find(|x| x.name().map(|y| y == *device_name).unwrap_or(false))
-        .unwrap()
 }

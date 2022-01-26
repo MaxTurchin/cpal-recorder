@@ -6,6 +6,7 @@ use std::sync::mpsc::Receiver;
 
 use std::marker::PhantomData;
 
+#[derive(Debug)]
 pub enum BusConfig {
     Mono,
     Stereo,
@@ -13,11 +14,11 @@ pub enum BusConfig {
 
 impl BusConfig {
     pub fn get_bus_config(nof_channels: &u8) -> BusConfig {
-        println!("nof_channels: {}", nof_channels);
+        // println!("nof_channels: {}", nof_channels);
         match nof_channels {
             1 => BusConfig::Mono,
             2 => BusConfig::Stereo,
-            n => panic!("get_bus_config: Oh no invalid nof channels: {}", n),
+            n => panic!("get_bus_config: Oh no! invalid nof channels: {}", n),
         }
     }
 }
@@ -66,6 +67,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> InputBus<T> {
     }
 
     pub fn play_stream(&self) {
+        println!("Broadcast stream started!");
         self.stream.play();
     }
 
@@ -79,6 +81,10 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> InputBus<T> {
 
     pub fn get_channel_ids(&self) -> Vec<u8> {
         self.channel_ids.clone()
+    }
+
+    pub fn to_string(&self) -> String {
+        return format!("Channels: {:?}", self.channel_ids);
     }
 }
 
@@ -124,6 +130,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
     }
 
     pub fn play_stream(&self) {
+        println!("Playback stream started!");
         self.stream.play();
     }
 
@@ -137,6 +144,10 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
 
     pub fn get_channel_ids(&self) -> Vec<u8> {
         self.channel_ids.clone()
+    }
+
+    pub fn to_string(&self) -> String {
+        return format!("Channels: {:?}", self.channel_ids);
     }
 }
 

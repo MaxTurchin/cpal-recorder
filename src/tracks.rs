@@ -117,6 +117,10 @@ impl Track {
         self.monitor
     }
 
+    pub fn as_tup(&self) -> (u8, String, bool, bool) {
+        (self.id, self.name.clone(), self.rec, self.monitor)
+    }
+
     fn stop_thread(&mut self) {
         let tx = match self.term_tx.pop() {
             Some(t) => t,
@@ -143,7 +147,7 @@ fn write_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
                     Ok(rx) => rx,
                     Err(e) => panic!("write_thread: Oh no! {}", e),
                 };
-                println!("Received");
+                // println!("Received");
 
                 //Start reading from bus_rx and writing to file.
                 loop {
@@ -154,7 +158,10 @@ fn write_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
                     }
                     //Looks for signal to terminate thread.
                     match term_rx.try_recv() {
-                        Ok(_) => break,
+                        Ok(_) => {
+                            println!("Write thread killed!");
+                            break;
+                        }
                         Err(_) => continue,
                     }
                 }
@@ -169,6 +176,7 @@ fn playback_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
     term_rx: Receiver<()>,
     out_channels: Vec<u8>,
 ) {
+    println!("Playback Thread spawned!");
     thread::spawn(move || loop {
         //hound reads first sample as R, cpal expects L
         // playback_tx.send((cpal::Sample::from(&0.0)));
@@ -194,6 +202,7 @@ fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
     monitor_tx: Sender<(u8, T)>,
     term_rx: Receiver<()>,
 ) {
+    println!("Monitor Thread spawned!");
     thread::spawn(move || {
         let bus_rx: BroadcastReceiver<(u8, T)> = thread_rx.recv().unwrap();
         println!("Received");
@@ -204,7 +213,10 @@ fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
             };
             monitor_tx.send(tup);
             match term_rx.try_recv() {
-                Ok(_) => break,
+                Ok(_) => {
+                    println!("Monitor Thread killed!");
+                    break;
+                }
                 Err(_) => continue,
             }
         }
