@@ -300,20 +300,26 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
     out_tx: Sender<T>,
 ) {
     thread::spawn(move || {
-        let track_rxs = match thread_rx.recv() {
+        //TODO: support i16 and u16 sample formats
+
+        let mut track_rxs = match thread_rx.recv() {
             Ok(tx) => tx,
             Err(e) => panic!("mix_thread: Oh no! {}", e),
         };
-        println!("mix_thread: rxs len: {}", track_rxs.len());
 
         loop {
             let mut samples_avg = 0.0;
-            for rx in track_rxs.iter() {
+            for idx in 0..(track_rxs.len()) {
                 loop {
-                    let tup = match rx.recv() {
+                    let tup = match track_rxs[idx].recv() {
                         Ok(t) => t,
-                        Err(_) => continue,
+                        Err(_) => {
+                            track_rxs.remove(idx);
+                            break
+                            // continue;
+                        }
                     };
+
                     if tup.to_f32().is_nan() {
                         continue;
                     }
@@ -329,6 +335,11 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
 
             if let Ok(_) = term_rx.try_recv() {
                 break;
+            }
+
+            match thread_rx.try_recv() {
+                Ok(mut rxs) => track_rxs.append(&mut rxs),
+                Err(_) => continue
             }
         }
     });
