@@ -36,7 +36,7 @@ impl RouteMap {
         }
     }
 
-    pub fn get_track_busses(&self, track_id: &u8) -> Option<(u8, u8)> {
+    pub fn get_track_busses(&self, track_id: &u8) -> Option<(u8, u8)> { // (in_bus, out_bus)
         for route in self.routes.iter() {
             let tracks = &route.2;
             if tracks.contains(track_id) {
@@ -106,8 +106,8 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
                 sample_format: sample_format,
             },
             tracks: Vec::<Track>::new(),
-            input_busses: Vec::<(BroadcastReceiver<T>, BroadcastReceiver<T>, InputBus<T>)>::new(),
-            output_busses: Vec::<(Sender<T>, OutputBus<T>)>::new(),
+            input_busses: Vec::<(BroadcastReceiver<T>, BroadcastReceiver<T>, InputBus<T>)>::new(),  //(Rx for recording, Rx for monitoring, InputBus)
+            output_busses: Vec::<(Sender<T>, OutputBus<T>)>::new(),  //(Sender for sending samples, OutputBus)
             routes: RouteMap::new(),
             monitor_txs: Vec::<Sender<()>>::new(),
         }
