@@ -123,7 +123,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
         self.track_ids.push(track_id);
     }
 
-    pub fn play_stream(&mut self) {
+    pub fn play_stream(&self) {
         self.stream.play();
     }
 
