@@ -9,8 +9,6 @@ use hound::{WavReader, WavSpec, WavWriter};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
-
-
 pub struct Track {
     id: u8,
     name: String,
@@ -20,7 +18,6 @@ pub struct Track {
     rec: bool,
     monitor: bool,
 }
-
 
 impl Track {
     pub fn new(
@@ -41,16 +38,15 @@ impl Track {
         }
     }
 
-
     pub fn record<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
         &mut self,
-    ) -> Sender<BroadcastReceiver<T>> {
+    ) -> Sender<BroadcastReceiver<(u8, T)>> {
         self.add_file();
 
         let writer = WavWriter::create(self.files.last().unwrap(), self.wav_spec).unwrap();
         let writer = Arc::new(Mutex::new(Some(writer)));
 
-        let (thread_tx, thread_rx) = std::sync::mpsc::channel::<BroadcastReceiver<T>>();
+        let (thread_tx, thread_rx) = std::sync::mpsc::channel::<BroadcastReceiver<(u8, T)>>();
         let (term_tx, term_rx) = std::sync::mpsc::channel();
         write_thread(writer, thread_rx, term_rx);
         self.term_tx.push(term_tx);
@@ -58,10 +54,10 @@ impl Track {
         thread_tx
     }
 
-
     pub fn start_playback<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
         &mut self,
-    ) -> Option<Receiver<T>> {
+        out_channels: Vec<u8>,
+    ) -> Option<Receiver<(u8, T)>> {
         let playback_file = match self.files.last() {
             Some(f) => f,
             None => return None,
@@ -72,24 +68,23 @@ impl Track {
         };
 
         let (term_tx, term_rx) = std::sync::mpsc::channel();
-        let (playback_tx, playback_rx) = std::sync::mpsc::channel::<T>();
-        playback_thread(reader, playback_tx, term_rx);
+        let (playback_tx, playback_rx) = std::sync::mpsc::channel::<(u8, T)>();
+        playback_thread(reader, playback_tx, term_rx, out_channels);
         self.term_tx.push(term_tx);
 
         Some(playback_rx)
     }
 
-
     pub fn start_monitor<T: 'static + cpal::Sample + Send + Sync>(
         &mut self,
         out_chs: Vec<u8>,
     ) -> (
-        Sender<BroadcastReceiver<T>>, // tx for sending bus_rx
-        Receiver<T>,                  //rx for receiving Samples
+        Sender<BroadcastReceiver<(u8, T)>>, // tx for sending bus_rx
+        Receiver<(u8, T)>,                  //rx for receiving Samples
     ) {
         let (thread_tx, thread_rx) = std::sync::mpsc::channel();
         let (term_tx, term_rx) = std::sync::mpsc::channel();
-        let (monitor_tx, monitor_rx) = std::sync::mpsc::channel::<T>();
+        let (monitor_tx, monitor_rx) = std::sync::mpsc::channel::<(u8, T)>();
 
         monitor_thread(thread_rx, monitor_tx, term_rx);
         self.term_tx.push(term_tx);
@@ -97,37 +92,30 @@ impl Track {
         (thread_tx, monitor_rx)
     }
 
-
     //Must be called after stop_monitor
     pub fn stop_recording(&mut self) {
         self.stop_thread();
     }
 
-
     pub fn stop_monitor(&mut self) {
         self.stop_thread();
     }
-
 
     pub fn set_rec(&mut self, state: bool) {
         self.rec = state;
     }
 
-
     pub fn set_monitor(&mut self, state: bool) {
         self.monitor = state;
     }
-
 
     pub fn is_rec_armed(&self) -> bool {
         self.rec
     }
 
-
     pub fn is_monitored(&self) -> bool {
         self.monitor
     }
-
 
     fn stop_thread(&mut self) {
         let tx = match self.term_tx.pop() {
@@ -137,23 +125,21 @@ impl Track {
         tx.send(());
     }
 
-
     fn add_file(&mut self) {
         let fname = format!("{}_{}.wav", self.name, self.files.len() + 1);
         self.files.push(fname);
     }
 }
 
-
 fn write_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
     writer: WavWriterHandle,
-    thread_rx: Receiver<BroadcastReceiver<T>>,
+    thread_rx: Receiver<BroadcastReceiver<(u8, T)>>,
     term_rx: Receiver<()>,
 ) {
     thread::spawn(move || {
         if let Ok(mut guard) = writer.try_lock() {
             if let Some(writer) = guard.as_mut() {
-                let bus_rx: BroadcastReceiver<T> = match thread_rx.recv() {
+                let bus_rx: BroadcastReceiver<(u8, T)> = match thread_rx.recv() {
                     Ok(rx) => rx,
                     Err(e) => panic!("write_thread: Oh no! {}", e),
                 };
@@ -162,8 +148,8 @@ fn write_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
                 //Start reading from bus_rx and writing to file.
                 loop {
                     //Tries to receive info from broadcast buffer.
-                    if let Ok(s) = bus_rx.try_recv() {
-                        let sample: T = cpal::Sample::from(&s);
+                    if let Ok(t) = bus_rx.try_recv() {
+                        let sample: T = cpal::Sample::from(&t.1);
                         writer.write_sample(sample).ok();
                     }
                     //Looks for signal to terminate thread.
@@ -177,41 +163,24 @@ fn write_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
     });
 }
 
-
 fn playback_thread<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
     mut reader: WavReader<BufReader<File>>,
-    playback_tx: Sender<T>,
+    playback_tx: Sender<(u8, T)>,
     term_rx: Receiver<()>,
+    out_channels: Vec<u8>,
 ) {
     thread::spawn(move || loop {
         //hound reads first sample as R, cpal expects L
-        playback_tx.send(cpal::Sample::from(&0.0));
+        // playback_tx.send((cpal::Sample::from(&0.0)));
+        let mut ch_idx = 0;
 
         for sample in reader.samples() {
-            playback_tx.send(sample.unwrap());
-        }
-        match term_rx.try_recv() {
-            Ok(_) => break,
-            Err(_) => continue,
-        }
-    });
-}
+            playback_tx.send((out_channels[ch_idx], sample.unwrap()));
+            ch_idx += 1;
+            if ch_idx >= out_channels.len() {
+                ch_idx = 0;
+            }
 
-
-fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
-    thread_rx: Receiver<BroadcastReceiver<T>>,
-    monitor_tx: Sender<T>,
-    term_rx: Receiver<()>,
-) {
-    thread::spawn(move || {
-        let bus_rx: BroadcastReceiver<T> = thread_rx.recv().unwrap();
-        println!("Received");
-        loop {
-            let sample = match bus_rx.try_recv() {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            monitor_tx.send(sample);
             match term_rx.try_recv() {
                 Ok(_) => break,
                 Err(_) => continue,
@@ -220,6 +189,27 @@ fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
     });
 }
 
+fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
+    thread_rx: Receiver<BroadcastReceiver<(u8, T)>>,
+    monitor_tx: Sender<(u8, T)>,
+    term_rx: Receiver<()>,
+) {
+    thread::spawn(move || {
+        let bus_rx: BroadcastReceiver<(u8, T)> = thread_rx.recv().unwrap();
+        println!("Received");
+        loop {
+            let tup = match bus_rx.try_recv() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            monitor_tx.send(tup);
+            match term_rx.try_recv() {
+                Ok(_) => break,
+                Err(_) => continue,
+            }
+        }
+    });
+}
 
 pub type WavWriterHandle = Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>;
 
@@ -231,7 +221,6 @@ pub fn wav_spec_from_config(config: &StreamConfig, sample_f: &SampleFormat) -> W
         sample_format: sample_format(*sample_f),
     }
 }
-
 
 pub fn sample_format(format: cpal::SampleFormat) -> hound::SampleFormat {
     match format {

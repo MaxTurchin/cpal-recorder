@@ -36,7 +36,8 @@ impl RouteMap {
         }
     }
 
-    pub fn get_track_busses(&self, track_id: &u8) -> Option<(u8, u8)> { // (in_bus, out_bus)
+    pub fn get_track_busses(&self, track_id: &u8) -> Option<(u8, u8)> {
+        // (in_bus, out_bus)
         for route in self.routes.iter() {
             let tracks = &route.2;
             if tracks.contains(track_id) {
@@ -59,12 +60,12 @@ impl RouteMap {
 
 struct MonitorLink<T> {
     out_bus_id: u8,
-    tx_to_bus: Sender<T>,
-    pub rxs_from_monitors: Vec<Receiver<T>>,
+    tx_to_bus: Sender<(u8, T)>,
+    pub rxs_from_monitors: Vec<Receiver<(u8, T)>>,
 }
 
 impl<T> MonitorLink<T> {
-    pub fn as_tup(self) -> (u8, Sender<T>, Vec<Receiver<T>>) {
+    pub fn as_tup(self) -> (u8, Sender<(u8, T)>, Vec<Receiver<(u8, T)>>) {
         (self.out_bus_id, self.tx_to_bus, self.rxs_from_monitors)
     }
 }
@@ -81,8 +82,12 @@ pub struct RouteConfig {
 pub struct Router<T: 'static + cpal::Sample + hound::Sample + Send + Sync> {
     config: RouteConfig,
     tracks: Vec<Track>,
-    input_busses: Vec<(BroadcastReceiver<T>, BroadcastReceiver<T>, InputBus<T>)>, // (record_rx, monitor_rx, input_bus)
-    output_busses: Vec<(Sender<T>, OutputBus<T>)>, //(bus_tx, output_bus)
+    input_busses: Vec<(
+        BroadcastReceiver<(u8, T)>,
+        BroadcastReceiver<(u8, T)>,
+        InputBus<T>,
+    )>, // (record_rx, monitor_rx, input_bus)
+    output_busses: Vec<(Sender<(u8, T)>, OutputBus<T>)>, //(bus_tx, output_bus)
     routes: RouteMap,
     monitor_txs: Vec<Sender<()>>,
 }
@@ -106,8 +111,12 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
                 sample_format: sample_format,
             },
             tracks: Vec::<Track>::new(),
-            input_busses: Vec::<(BroadcastReceiver<T>, BroadcastReceiver<T>, InputBus<T>)>::new(),  //(Rx for recording, Rx for monitoring, InputBus)
-            output_busses: Vec::<(Sender<T>, OutputBus<T>)>::new(),  //(Sender for sending samples, OutputBus)
+            input_busses: Vec::<(
+                BroadcastReceiver<(u8, T)>,
+                BroadcastReceiver<(u8, T)>,
+                InputBus<T>,
+            )>::new(), //(Rx for recording, Rx for monitoring, InputBus)
+            output_busses: Vec::<(Sender<(u8, T)>, OutputBus<T>)>::new(), //(Sender for sending samples, OutputBus)
             routes: RouteMap::new(),
             monitor_txs: Vec::<Sender<()>>::new(),
         }
@@ -117,8 +126,8 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         let bus_id = self.input_busses.len() as u8;
         let device = get_input_device(&self.config.host, &self.config.in_device);
 
-        let (bus_rec_tx, bus_rec_rx) = multiqueue::broadcast_queue::<T>(50_000);
-        let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<T>(50_000);
+        let (bus_rec_tx, bus_rec_rx) = multiqueue::broadcast_queue::<(u8, T)>(1_000_000);
+        let (bus_mon_tx, bus_mon_rx) = multiqueue::broadcast_queue::<(u8, T)>(1_000_000);
         let txs = vec![bus_rec_tx, bus_mon_tx];
 
         let bus_conf = BusConfig::get_bus_config(&(channel_ids.len() as u8));
@@ -141,7 +150,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         let bus_id = self.output_busses.len() as u8;
         let device = get_output_device(&self.config.host, &self.config.out_device);
 
-        let (bus_tx, bus_rx) = mpsc::channel::<T>();
+        let (bus_tx, bus_rx) = mpsc::channel::<(u8, T)>();
         let out_bus = OutputBus::<T>::new(
             bus_id,
             device,
@@ -217,7 +226,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
             links.push(MonitorLink::<T> {
                 out_bus_id: out_bus_id,
                 tx_to_bus: out.0.clone(),
-                rxs_from_monitors: Vec::<Receiver<T>>::new(),
+                rxs_from_monitors: Vec::<Receiver<(u8, T)>>::new(),
             });
 
             for input in self.input_busses.iter() {
@@ -240,11 +249,12 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
                         monitor_tx.send(*in_bus_rx.clone());
                         in_bus_rx = Box::new(in_bus_rx.add_stream());
                     } else if !self.tracks[*track_id as usize].is_rec_armed() {
-                        let playback_rx: Receiver<T> =
-                            match self.tracks[*track_id as usize].start_playback() {
-                                Some(rx) => rx,
-                                None => continue,
-                            };
+                        let playback_rx: Receiver<(u8, T)> = match self.tracks[*track_id as usize]
+                            .start_playback(out_bus_channels.clone())
+                        {
+                            Some(rx) => rx,
+                            None => continue,
+                        };
                         let links_len = links.len();
                         links[links_len - 1].rxs_from_monitors.push(playback_rx);
                     }
@@ -258,11 +268,12 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         println!("Run mix streams");
         while let Ok(link) = links.pop().ok_or("") {
             let (out_id, out_tx, monitor_rxs) = link.as_tup();
-            println!("monitor_rxs      : {}", monitor_rxs.len());
-            let (thread_tx, thread_rx) = mpsc::channel::<Vec<Receiver<T>>>();
+            // println!("monitor_rxs      : {}", monitor_rxs.len());
+            let (thread_tx, thread_rx) = mpsc::channel::<Vec<Receiver<(u8, T)>>>();
             let (term_tx, term_rx) = mpsc::channel();
+            let out_channels = self.output_busses[out_id as usize].1.get_channel_ids();
 
-            mix_thread(thread_rx, term_rx, out_tx);
+            mix_thread(thread_rx, term_rx, out_tx, out_channels);
             thread_tx.send(monitor_rxs);
             self.monitor_txs.push(term_tx);
         }
@@ -295,9 +306,10 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
 }
 
 fn mix_thread<T: 'static + cpal::Sample + Send>(
-    thread_rx: Receiver<Vec<Receiver<T>>>,
+    thread_rx: Receiver<Vec<Receiver<(u8, T)>>>,
     term_rx: Receiver<()>,
-    out_tx: Sender<T>,
+    out_tx: Sender<(u8, T)>,
+    out_channels: Vec<u8>,
 ) {
     thread::spawn(move || {
         //TODO: support i16 and u16 sample formats
@@ -308,30 +320,33 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
         };
 
         loop {
-            let mut samples_avg = 0.0;
-            for idx in 0..(track_rxs.len()) {
-                loop {
-                    let tup = match track_rxs[idx].recv() {
-                        Ok(t) => t,
-                        Err(_) => {
-                            track_rxs.remove(idx);
-                            break
-                            // continue;
-                        }
-                    };
+            for ch in out_channels.iter() {
+                let mut samples_avg = 0.0;
+                for idx in 0..(track_rxs.len()) {
+                    loop {
+                        // println!("track rxs len: {} idx {}!!!!!!!!!!!!!!!!!!!!", track_rxs.len(), &idx);
+                        let (dest_ch, sample) = match track_rxs[idx].recv() {
+                            Ok(t) => t,
+                            Err(_) => {
+                                track_rxs.remove(idx);
+                                break;
+                                // continue;
+                            }
+                        };
 
-                    if tup.to_f32().is_nan() {
-                        continue;
+                        if dest_ch != *ch || sample.to_f32().is_nan() {
+                            continue;
+                        }
+                        samples_avg += sample.to_f32();
+                        break;
                     }
-                    samples_avg += tup.to_f32();
-                    break;
                 }
+                samples_avg = samples_avg as f32 / track_rxs.len() as f32;
+                if samples_avg.is_nan() {
+                    continue;
+                }
+                out_tx.send((*ch, cpal::Sample::from(&samples_avg)));
             }
-            samples_avg = samples_avg as f32 / track_rxs.len() as f32;
-            if samples_avg.is_nan() {
-                continue;
-            }
-            out_tx.send(cpal::Sample::from::<f32>(&samples_avg));
 
             if let Ok(_) = term_rx.try_recv() {
                 break;
@@ -339,7 +354,7 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
 
             match thread_rx.try_recv() {
                 Ok(mut rxs) => track_rxs.append(&mut rxs),
-                Err(_) => continue
+                Err(_) => continue,
             }
         }
     });
