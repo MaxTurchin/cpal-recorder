@@ -37,7 +37,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> InputBus<T> {
         stream_config: StreamConfig,
         bus_config: BusConfig,
         channel_ids: Vec<u8>,
-        txs: Vec<BroadcastSender<T>>,
+        txs: Vec<BroadcastSender<(u8, T)>>,
     ) -> InputBus<T> {
         let nof_channels = stream_config.channels as u8;
         let ch_ids = channel_ids.clone();
@@ -96,7 +96,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
         device: Device,
         config: StreamConfig,
         channel_ids: Vec<u8>,
-        rx: Receiver<T>,
+        rx: Receiver<(u8, T)>,
     ) -> OutputBus<T> {
         let nof_channels = config.channels as u8;
         let ch_ids = channel_ids.clone();
@@ -104,7 +104,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
             .build_output_stream(
                 &config,
                 move |data, _: &_| {
-                    playback_clb::<T>(data, &rx);
+                    playback_clb::<T>(data, &rx, &ch_ids);
                 },
                 err_fn,
             )
@@ -142,7 +142,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
 
 fn broadcast_clb<T: cpal::Sample>(
     data: &[T],
-    txs: &Vec<BroadcastSender<T>>,
+    txs: &Vec<BroadcastSender<(u8, T)>>,
     in_chs: &Vec<u8>,
     nof_chs: &u8,
     bus_config: &BusConfig,
@@ -153,11 +153,11 @@ fn broadcast_clb<T: cpal::Sample>(
             for tx in txs {
                 match bus_config {
                     BusConfig::Mono => {
-                        tx.try_send(sample);
-                        tx.try_send(sample);
+                        tx.try_send((1 as u8, sample));
+                        tx.try_send((2 as u8, sample));
                     }
                     BusConfig::Stereo => {
-                        tx.try_send(sample);
+                        tx.try_send((cur_ch, sample));
                     }
                 };
             }
@@ -174,13 +174,26 @@ fn broadcast_clb<T: cpal::Sample>(
     }
 }
 
-fn playback_clb<T: cpal::Sample>(data: &mut [T], rx: &Receiver<T>) {
-    let mut channel_id: u8 = 1;
+fn playback_clb<T: cpal::Sample>(data: &mut [T], rx: &Receiver<(u8, T)>, out_channels: &Vec<u8>) {
+    let mut ch_idx = 0;
     for sample in data {
-        *sample = match rx.recv().ok() {
-            Some(s) => s,
+        let (dest_ch, s_data) = match rx.recv().ok() {
+            Some(t) => t,
             None => continue,
         };
+
+        if dest_ch == out_channels[ch_idx] {
+            ch_idx += 1;
+            if ch_idx >= out_channels.len() {
+                ch_idx = 0;
+            }
+            *sample = s_data;
+        } else {
+            ch_idx += 1;
+            if ch_idx >= out_channels.len() {
+                ch_idx = 0;
+            }
+        }
     }
 }
 

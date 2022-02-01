@@ -43,7 +43,6 @@ fn main() {
     );
     router.new_input_bus(vec![1]);
     router.new_input_bus(vec![1, 2]);
-
     router.new_output_bus(vec![1, 2]);
 
     router.new_track("Tractor".to_string(), 0, 0);
@@ -59,7 +58,7 @@ fn main() {
 
     router.monitor();
     router.record();
-    thread::sleep(std::time::Duration::from_secs(10));
+    thread::sleep(std::time::Duration::from_secs(100));
     router.stop_recording();
     router.stop_monitor();
     println!("Done!");
@@ -67,7 +66,6 @@ fn main() {
 
     router.set_monitor(1, false);
     router.set_recording(1, false);
-
 
     router.monitor();
     router.record();
