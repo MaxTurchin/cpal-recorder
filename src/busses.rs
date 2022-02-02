@@ -6,6 +6,7 @@ use std::sync::mpsc::Receiver;
 
 use std::marker::PhantomData;
 
+#[derive(Debug)]
 pub enum BusConfig {
     Mono,
     Stereo,
@@ -13,11 +14,11 @@ pub enum BusConfig {
 
 impl BusConfig {
     pub fn get_bus_config(nof_channels: &u8) -> BusConfig {
-        println!("nof_channels: {}", nof_channels);
+        // println!("nof_channels: {}", nof_channels);
         match nof_channels {
             1 => BusConfig::Mono,
             2 => BusConfig::Stereo,
-            n => panic!("get_bus_config: Oh no invalid nof channels: {}", n),
+            n => panic!("get_bus_config: Oh no! invalid nof channels: {}", n),
         }
     }
 }
@@ -66,6 +67,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> InputBus<T> {
     }
 
     pub fn play_stream(&self) {
+        println!("Broadcast stream started!");
         self.stream.play();
     }
 
@@ -80,6 +82,10 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> InputBus<T> {
     pub fn get_channel_ids(&self) -> Vec<u8> {
         self.channel_ids.clone()
     }
+
+    pub fn to_string(&self) -> String {
+        return format!("Channels: {:?}", self.channel_ids);
+    }
 }
 
 pub struct OutputBus<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> {
@@ -87,6 +93,7 @@ pub struct OutputBus<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync
     track_ids: Vec<u8>,
     channel_ids: Vec<u8>,
     pub stream: Stream,
+    backlog: Box<Vec<(u8, T)>>,
     _type: PhantomData<T>,
 }
 
@@ -100,11 +107,13 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
     ) -> OutputBus<T> {
         let nof_channels = config.channels as u8;
         let ch_ids = channel_ids.clone();
+        let backlog = Box::new(Vec::<(u8, T)>::new());
+        let mut backlog_ref = backlog.clone();
         let stream = device
             .build_output_stream(
                 &config,
                 move |data, _: &_| {
-                    playback_clb::<T>(data, &rx, &ch_ids);
+                    playback_clb::<T>(data, &rx, &ch_ids, &mut backlog_ref);
                 },
                 err_fn,
             )
@@ -115,6 +124,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
             track_ids: Vec::<u8>::new(),
             channel_ids: channel_ids,
             stream: stream,
+            backlog: backlog,
             _type: PhantomData::<T>,
         }
     }
@@ -124,6 +134,7 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
     }
 
     pub fn play_stream(&self) {
+        println!("Playback stream started!");
         self.stream.play();
     }
 
@@ -137,6 +148,10 @@ impl<T: 'static + std::clone::Clone + cpal::Sample + Send + Sync> OutputBus<T> {
 
     pub fn get_channel_ids(&self) -> Vec<u8> {
         self.channel_ids.clone()
+    }
+
+    pub fn to_string(&self) -> String {
+        return format!("Channels: {:?}", self.channel_ids);
     }
 }
 
@@ -174,24 +189,30 @@ fn broadcast_clb<T: cpal::Sample>(
     }
 }
 
-fn playback_clb<T: cpal::Sample>(data: &mut [T], rx: &Receiver<(u8, T)>, out_channels: &Vec<u8>) {
+fn playback_clb<T: 'static + cpal::Sample + Send + Sync>(
+    data: &mut [T],
+    mut rx: &Receiver<(u8, T)>,
+    out_channels: &Vec<u8>,
+    backlog: &mut Box<Vec<(u8, T)>>,
+) {
     let mut ch_idx = 0;
     for sample in data {
-        let (dest_ch, s_data) = match rx.recv().ok() {
-            Some(t) => t,
-            None => continue,
-        };
+        loop {
+            let (dest_ch, s_data) = match rx.recv().ok() {
+                Some(t) => t,
+                None => {
+                    ch_idx = 0;
+                    continue;
+                }
+            };
 
-        if dest_ch == out_channels[ch_idx] {
-            ch_idx += 1;
-            if ch_idx >= out_channels.len() {
-                ch_idx = 0;
-            }
-            *sample = s_data;
-        } else {
-            ch_idx += 1;
-            if ch_idx >= out_channels.len() {
-                ch_idx = 0;
+            if dest_ch == out_channels[ch_idx] {
+                ch_idx += 1;
+                if ch_idx >= out_channels.len() {
+                    ch_idx = 0;
+                }
+                *sample = s_data;
+                break;
             }
         }
     }
