@@ -11,7 +11,8 @@ use std::thread;
 use crate::busses::{BusConfig, InputBus, OutputBus};
 use crate::tracks::Track;
 use crate::utils::{
-    get_flushed_broadcast_queue, get_input_device_by_name, get_output_device_by_name,
+    get_flushed_broadcast_queue, get_flushed_mpsc_queue, get_input_device_by_name,
+    get_output_device_by_name,
 };
 
 struct RouteMap {
@@ -250,6 +251,8 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
                         let (monitor_tx, monitor_rx) = self.tracks[*track_id as usize]
                             .start_monitor::<T>(out_bus_channels.clone());
                         let links_len = links.len();
+
+                        get_flushed_mpsc_queue(&monitor_rx); //flush queue
                         links[links_len - 1].rxs_from_monitors.push(monitor_rx);
 
                         monitor_tx.send(*in_bus_rx.clone());
@@ -272,6 +275,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
 
     fn _run_monitor_out_streams(&mut self, mut links: Vec<MonitorLink<T>>) {
         while let Ok(link) = links.pop().ok_or("") {
+            println!("pop");
             let (out_id, out_tx, monitor_rxs) = link.as_tup();
             // println!("monitor_rxs      : {}", monitor_rxs.len());
             let (thread_tx, thread_rx) = mpsc::channel::<Vec<Receiver<(u8, T)>>>();
@@ -341,13 +345,11 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
                 let mut samples_avg = 0.0;
                 for idx in 0..(track_rxs.len()) {
                     loop {
-                        // println!("track rxs len: {} idx {}!!!!!!!!!!!!!!!!!!!!", track_rxs.len(), &idx);
                         let (dest_ch, sample) = match track_rxs[idx].recv() {
                             Ok(t) => t,
                             Err(_) => {
                                 track_rxs.remove(idx);
                                 break;
-                                // continue;
                             }
                         };
 
@@ -366,7 +368,6 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
             }
 
             if let Ok(_) = term_rx.try_recv() {
-                println!("Mix Thread killed!");
                 break;
             }
 

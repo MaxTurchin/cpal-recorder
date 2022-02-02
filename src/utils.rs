@@ -71,8 +71,15 @@ pub fn get_output_device_by_name(host: &Host, device_name: &String) -> Device {
 }
 
 pub fn get_flushed_broadcast_queue<T: 'static + cpal::Sample + hound::Sample + Send + Sync>(
-    queue: multiqueue::BroadcastReceiver<T>,
-) -> multiqueue::BroadcastReceiver<T> {
+    queue: multiqueue::BroadcastReceiver<(u8, T)>,
+) -> multiqueue::BroadcastReceiver<(u8, T)> {
+    while queue.try_recv().is_ok() {}
+    return queue;
+}
+
+pub fn get_flushed_mpsc_queue<T: 'static + cpal::Sample + Send + Sync>(
+    queue: &std::sync::mpsc::Receiver<(u8, T)>,
+) -> &std::sync::mpsc::Receiver<(u8, T)> {
     while queue.try_recv().is_ok() {}
     return queue;
 }
