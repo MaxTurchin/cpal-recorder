@@ -71,17 +71,11 @@ impl TrackUi {
             app_router.set_recording(self.id, self.is_recorded);
         }
         if monitor_changed {
-            app_router.set_monitor(self.id, self.is_monitored);
-            app_router.stop_monitor();
-            app_router.monitor();
-
-            // if self.is_monitored {
-            //     app_router.stop_monitor();
-            //     app_router.monitor();
-            // } else {
-            //     app_router.stop_monitor();
-            //     app_router.monitor();
-            // }
+            if self.is_monitored {
+                app_router.start_monitor(self.id);
+            } else {
+                app_router.stop_monitor(self.id);
+            }
         }
     }
 

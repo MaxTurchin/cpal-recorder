@@ -77,19 +77,20 @@ impl Track {
 
     pub fn start_monitor<T: 'static + cpal::Sample + Send + Sync>(
         &mut self,
+        mix_tx: Sender<(u8,T)>,
         out_chs: Vec<u8>,
-    ) -> (
-        Sender<BroadcastReceiver<(u8, T)>>, // tx for sending bus_rx
-        Receiver<(u8, T)>,                  //rx for receiving Samples
-    ) {
+    ) ->
+        Sender<BroadcastReceiver<(u8, T)>> // tx for sending bus_rx
+        // Receiver<(u8, T)>,                  //rx for receiving Samples
+    {
         let (thread_tx, thread_rx) = std::sync::mpsc::channel();
         let (term_tx, term_rx) = std::sync::mpsc::channel();
-        let (monitor_tx, monitor_rx) = std::sync::mpsc::channel::<(u8, T)>();
+        // let (monitor_tx, monitor_rx) = std::sync::mpsc::channel::<(u8, T)>();
 
-        monitor_thread(thread_rx, monitor_tx, term_rx);
+        monitor_thread(thread_rx, mix_tx, term_rx);
         self.term_tx.push(term_tx);
 
-        (thread_tx, monitor_rx)
+        thread_tx
     }
 
     //Must be called after stop_monitor
@@ -204,14 +205,14 @@ fn monitor_thread<T: 'static + cpal::Sample + Send + Sync>(
 ) {
     println!("Monitor Thread spawned!");
     thread::spawn(move || {
-        let bus_rx: BroadcastReceiver<(u8, T)> = thread_rx.recv().unwrap();
+        let bus_rx: BroadcastReceiver<(u8, T)> = thread_rx.recv().unwrap(); //get rx from in_bus
         println!("Received");
         loop {
             let tup = match bus_rx.try_recv() {
                 Ok(t) => t,
                 Err(_) => continue,
             };
-            monitor_tx.send(tup);
+            monitor_tx.send(tup);   //send tup to mix thread
             match term_rx.try_recv() {
                 Ok(_) => {
                     println!("Monitor Thread killed!");

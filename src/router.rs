@@ -94,6 +94,7 @@ pub struct Router<T: 'static + cpal::Sample + hound::Sample + Send + Sync> {
     output_busses: Vec<(Sender<(u8, T)>, OutputBus<T>)>, //(bus_tx, output_bus)
     routes: RouteMap,
     monitor_txs: Vec<Sender<()>>,
+    mix_threads: Vec<(u8, Sender<(u8, T)>, Sender<()>)>, //Vec of (Out bus id, Tx for writing to mix thread, Tx for terminating mix thread)
 }
 
 impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
@@ -123,6 +124,7 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
             output_busses: Vec::<(Sender<(u8, T)>, OutputBus<T>)>::new(), //(Sender for sending samples, OutputBus)
             routes: RouteMap::new(),
             monitor_txs: Vec::<Sender<()>>::new(),
+            mix_threads: Vec::<(u8, Sender<(u8, T)>, Sender<()>)>::new(),
         }
     }
 
@@ -165,7 +167,12 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         );
 
         out_bus.play_stream();
+
+        //Run mix_thread for new output_bus
+        let (mix_tx, term_tx) = self.run_mix_thread(out_bus.get_channel_ids(), bus_tx.clone());
+        self.mix_threads.push((out_bus.get_id(), mix_tx, term_tx));
         self.output_busses.push((bus_tx, out_bus));
+
         (self.output_busses.len() - 1) as u8
     }
 
@@ -223,71 +230,6 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         }
     }
 
-    pub fn monitor(&mut self) {
-        let mut links = Vec::<MonitorLink<T>>::new();
-
-        for out in self.output_busses.iter_mut() {
-            let (out_bus_id, out_bus_channels) = (out.1.get_id(), out.1.get_channel_ids());
-
-            links.push(MonitorLink::<T> {
-                out_bus_id: out_bus_id,
-                tx_to_bus: out.0.clone(),
-                rxs_from_monitors: Vec::<Receiver<(u8, T)>>::new(),
-            });
-
-            for input in self.input_busses.iter() {
-                let in_bus_id = input.2.get_id();
-
-                let mut in_bus_rx = Box::new(get_flushed_broadcast_queue(input.1.clone()));
-
-                let tracks = match self.routes.get_route_track_ids(&in_bus_id, &out_bus_id) {
-                    Some(t) => t,
-                    None => Vec::new(),
-                };
-
-                // println!("Run monitor streams");
-                for track_id in tracks.iter() {
-                    if self.tracks[*track_id as usize].is_monitored() {
-                        let (monitor_tx, monitor_rx) = self.tracks[*track_id as usize]
-                            .start_monitor::<T>(out_bus_channels.clone());
-                        let links_len = links.len();
-
-                        get_flushed_mpsc_queue(&monitor_rx); //flush queue
-                        links[links_len - 1].rxs_from_monitors.push(monitor_rx);
-
-                        monitor_tx.send(*in_bus_rx.clone());
-                        in_bus_rx = Box::new(in_bus_rx.add_stream());
-                    } else if !self.tracks[*track_id as usize].is_rec_armed() {
-                        let playback_rx: Receiver<(u8, T)> = match self.tracks[*track_id as usize]
-                            .start_playback(out_bus_channels.clone())
-                        {
-                            Some(rx) => rx,
-                            None => continue,
-                        };
-                        let links_len = links.len();
-                        links[links_len - 1].rxs_from_monitors.push(playback_rx);
-                    }
-                }
-            }
-        }
-        self._run_monitor_out_streams(links);
-    }
-
-    fn _run_monitor_out_streams(&mut self, mut links: Vec<MonitorLink<T>>) {
-        while let Ok(link) = links.pop().ok_or("") {
-            println!("pop");
-            let (out_id, out_tx, monitor_rxs) = link.as_tup();
-            // println!("monitor_rxs      : {}", monitor_rxs.len());
-            let (thread_tx, thread_rx) = mpsc::channel::<Vec<Receiver<(u8, T)>>>();
-            let (term_tx, term_rx) = mpsc::channel();
-            let out_channels = self.output_busses[out_id as usize].1.get_channel_ids();
-
-            mix_thread(thread_rx, term_rx, out_tx, out_channels);
-            thread_tx.send(monitor_rxs);
-            self.monitor_txs.push(term_tx);
-        }
-    }
-
     pub fn set_monitor(&mut self, track_id: u8, state: bool) {
         self.tracks[track_id as usize].set_monitor(state);
     }
@@ -296,20 +238,91 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
         self.tracks[track_id as usize].set_rec(state);
     }
 
-    pub fn stop_monitor(&mut self) {
-        //terminates mix monitor threads
-        while let Ok(term_tx) = self.monitor_txs.pop().ok_or(err_fn) {
-            println!("Terminating mix_thread");
-            term_tx.send(());
-        }
-        //terminates track monitor threads
-        for input_bus in self.input_busses.iter() {
-            let track_ids = input_bus.2.get_track_ids();
-            for track_id in track_ids.iter() {
-                self.tracks[*track_id as usize].stop_monitor();
-                println!("Terminated Monitor (Track {})", track_id);
+    pub fn start_monitor(&mut self, track_id: u8) {
+        //Get IO busses and channel handles
+        let (input, output) = match self.get_track_io_busses(track_id) {
+            Some(tup) => tup,
+            None => panic!("start_monitor: Oh no! Missing bus for track {}", track_id),
+        };
+        let input_rx = input.1.clone();
+
+        //Get Mix thread channel handles
+        let (mix_tx, mix_term_tx) = match self.get_mix_thread_by_out_bus(output.1.get_id()) {
+            Some(tup) => tup,
+            None => panic!("start_monitor: Oh no! No mix_thread was found!"),
+        };
+
+        //Start track monitor thread
+        //-start_monitor() returns Sender for sending Reciever for recieving samples from input bus.
+        let channel_ids = output.1.get_channel_ids();
+        let monitor_tx = self.tracks[track_id as usize].start_monitor(mix_tx, channel_ids);
+
+        //Sends flushed Rx from input_bus, to monitor thread
+        monitor_tx.send(get_flushed_broadcast_queue(input_rx));
+    }
+
+    pub fn stop_monitor(&mut self, track_id: u8) {
+        //Get IO busses and channel handles
+        let (input, output) = match self.get_track_io_busses(track_id) {
+            Some(tup) => tup,
+            None => panic!("start_monitor: Oh no! Missing bus for track {}", track_id),
+        };
+
+        //Get Mix thread channel handles
+        let (mix_tx, mix_term_tx) = match self.get_mix_thread_by_out_bus(output.1.get_id()) {
+            Some(tup) => tup,
+            None => panic!("start_monitor: Oh no! No mix_thread was found!"),
+        };
+        mix_term_tx.send(());
+        println!("Terminated Monitor (Track {})", track_id);
+    }
+
+    pub fn get_track_io_busses(
+        &self,
+        track_id: u8,
+    ) -> Option<(
+        &(
+            BroadcastReceiver<(u8, T)>,
+            BroadcastReceiver<(u8, T)>,
+            InputBus<T>,
+        ),
+        &(Sender<(u8, T)>, OutputBus<T>),
+    )> {
+        let mut in_bus = None;
+        let mut out_bus = None;
+
+        for input in self.input_busses.iter() {
+            if input.2.get_track_ids().contains(&track_id) {
+                in_bus = Some(input);
             }
         }
+
+        for output in self.output_busses.iter() {
+            if output.1.get_track_ids().contains(&track_id) {
+                out_bus = Some(output);
+            }
+        }
+
+        let i = match in_bus {
+            Some(bus) => bus,
+            None => return None,
+        };
+        let o = match out_bus {
+            Some(bus) => bus,
+            None => return None,
+        };
+
+        Some((i, o))
+    }
+
+    pub fn get_mix_thread_by_out_bus(&self, bus_id: u8) -> Option<(Sender<(u8, T)>, Sender<()>)> {
+        //Item is (bus_id, tx for sending samples to mix thread, tx for sending term signal)
+        for item in self.mix_threads.iter() {
+            if item.0 == bus_id {
+                return Some((item.1.clone(), item.2.clone()));
+            }
+        }
+        None
     }
 
     pub fn get_io_channels(&self) -> (Vec<u8>, Vec<u8>) {
@@ -323,10 +336,28 @@ impl<T: 'static + cpal::Sample + hound::Sample + Send + Sync> Router<T> {
     pub fn get_tracks(&self) -> &Vec<Track> {
         &self.tracks
     }
+
+    fn run_mix_thread(
+        &mut self,
+        out_channels: Vec<u8>,
+        out_tx: Sender<(u8, T)>,
+    ) -> (Sender<(u8, T)>, Sender<()>) {
+        //Multiple producers single consumer queue:
+        //  - Receiving side (tracks_rx) is sent to mix_thread.
+        //  - Transmiting side (tracks_tx) is cloned for each montior thread spawned
+        let (tracks_tx, tracks_rx) = mpsc::channel::<(u8, T)>();
+
+        //Channel for passing term signal to running mix_thread
+        let (term_tx, term_rx) = mpsc::channel::<()>();
+        mix_thread(tracks_rx, term_rx, out_tx, out_channels);
+
+        //Return (tx for sending (u8, sample) to mix, tx for sending termination signal to mix thread)
+        return (tracks_tx, term_tx);
+    }
 }
 
-fn mix_thread<T: 'static + cpal::Sample + Send>(
-    thread_rx: Receiver<Vec<Receiver<(u8, T)>>>,
+fn mix_thread<T: 'static + cpal::Sample + Send + Sync>(
+    tracks_rx: Receiver<(u8, T)>,
     term_rx: Receiver<()>,
     out_tx: Sender<(u8, T)>,
     out_channels: Vec<u8>,
@@ -335,32 +366,31 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
     thread::spawn(move || {
         //TODO: support i16 and u16 sample formats
 
-        let mut track_rxs = match thread_rx.recv() {
-            Ok(tx) => tx,
-            Err(e) => panic!("mix_thread: Oh no! {}", e),
-        };
-
+        let backlog = Vec::<(u8, T)>::new();
         loop {
             for ch in out_channels.iter() {
                 let mut samples_avg = 0.0;
-                for idx in 0..(track_rxs.len()) {
-                    loop {
-                        let (dest_ch, sample) = match track_rxs[idx].recv() {
-                            Ok(t) => t,
-                            Err(_) => {
-                                track_rxs.remove(idx);
-                                break;
-                            }
-                        };
-
-                        if dest_ch != *ch || sample.to_f32().is_nan() {
+                let mut sample_cnt = 0;
+                loop {
+                    let (dest_ch, sample) = match tracks_rx.recv() {
+                        Ok(t) => t,
+                        Err(_) => {
+                            // get_flushed_mpsc_queue(&tracks_rx);
                             continue;
                         }
-                        samples_avg += sample.to_f32();
-                        break;
+                    };
+
+                    if sample.to_f32().is_nan() {
+                        continue;
                     }
+
+                    if dest_ch != *ch {}
+                    samples_avg += sample.to_f32();
+                    sample_cnt += 1;
+                    break;
                 }
-                samples_avg = samples_avg as f32 / track_rxs.len() as f32;
+
+                samples_avg = samples_avg as f32 / sample_cnt as f32;
                 if samples_avg.is_nan() {
                     continue;
                 }
@@ -369,11 +399,6 @@ fn mix_thread<T: 'static + cpal::Sample + Send>(
 
             if let Ok(_) = term_rx.try_recv() {
                 break;
-            }
-
-            match thread_rx.try_recv() {
-                Ok(mut rxs) => track_rxs.append(&mut rxs),
-                Err(_) => continue,
             }
         }
     });
